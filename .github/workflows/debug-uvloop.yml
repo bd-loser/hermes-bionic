@@ -37,21 +37,12 @@ jobs:
           tar -xzf "$TMPDIR"/dl/uvloop-0.22.1.tar.gz -C "$TMPDIR"
           cd "$TMPDIR/uvloop-0.22.1"
           export ANDROID_API_LEVEL=24
-          echo "== PATH 1: unpatched pip wheel after /bin/sh fix =="
-          pip wheel . --no-deps -w "$TMPDIR/out1" 2>&1 | tail -6
+          echo "== configure direct run =="
+          (cd vendor/libuv && ./configure --help 2>&1 | head -2) || echo "configure failed"
+          echo "== PATH 1 full build output =="
+          pip wheel . --no-deps -w "$TMPDIR/out1" 2>&1 | tee "$TMPDIR/b1.log" | tail -3
+          grep -anB4 -A8 -iE "error|failed" "$TMPDIR/b1.log" | grep -aiE "error|failed|cannot|undefined|configure:|clang|no such" | grep -aviE "did not run|Failed to build one|Failed building wheel for uvloop|error originates" | head -30
           ls "$TMPDIR"/out1/*.whl 2>/dev/null && echo "UNPATCHED-BUILD-OK" || echo "UNPATCHED-BUILD-FAILED"
-          echo "== PATH 2: system libuv (force default) =="
-          pkg install -y libuv || true
-          ls "$PREFIX/lib"/libuv* "$PREFIX"/include/uv.h 2>/dev/null || echo "no libuv files"
-          $PYBIN - <<'PEOF'
-          import re
-          s=open("setup.py").read()
-          s=re.sub(r"(class uvloop_build_ext\(build_ext\):)", r"\1\n    use_system_libuv = True\n", s, count=1)
-          open("setup.py","w").write(s)
-          PEOF
-          grep -n "use_system_libuv = True" setup.py || sed -i "s/class uvloop_build_ext(build_ext):/class uvloop_build_ext(build_ext):\n    use_system_libuv = True/" setup.py || true
-          pip wheel . --no-deps -w "$TMPDIR/out2" 2>&1 | tail -6
-          ls "$TMPDIR"/out2/*.whl 2>/dev/null && echo "SYSLIBUV-BUILD-OK" || echo "SYSLIBUV-BUILD-FAILED"
           EOS
           chmod 0777 ../out/probe.sh
           docker run --rm -v "$PWD:/workspace" -v "$PWD/../out:/out" -w /workspace \
