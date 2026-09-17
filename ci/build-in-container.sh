@@ -42,13 +42,19 @@ fi
 PYTAG="cp$(python -c 'import sys;print(f"{sys.version_info.major}{sys.version_info.minor}")')"
 echo "→ building wheels for $PYTAG, hermes $HERMES_VERSION"
 
+# termux-docker has no /tmp for the unprivileged `system` user; Termux
+# convention is $PREFIX/tmp. Everything that reaches for a scratch dir
+# (pip tempdirs, venv, tar staging) follows TMPDIR.
+export TMPDIR="$HOME/tmp"
+mkdir -p "$TMPDIR"
+
 python -m venv "$HOME/benv"
 # shellcheck disable=SC1091
 . "$HOME/benv/bin/activate"
 pip install --quiet --upgrade pip wheel
 
 BUNDLE="hermes-wheels-${HERMES_VERSION}-${PYTAG}"
-WHEELS="/tmp/$BUNDLE"
+WHEELS="$TMPDIR/$BUNDLE"
 mkdir -p "$WHEELS"
 
 pip wheel "$BUILD_ROOT[termux]" \
@@ -56,7 +62,7 @@ pip wheel "$BUILD_ROOT[termux]" \
   -w "$WHEELS"
 
 echo "$HERMES_VERSION" > "$WHEELS/HERMES_VERSION"
-tar -czf "/out/$BUNDLE.tar.gz" -C /tmp "$BUNDLE"
+tar -czf "/out/$BUNDLE.tar.gz" -C "$TMPDIR" "$BUNDLE"
 ( cd /out && sha256sum "$BUNDLE.tar.gz" > "$BUNDLE.tar.gz.sha256" )
 ls -la /out/
 echo "built: $BUNDLE.tar.gz ($(du -h "/out/$BUNDLE.tar.gz" | cut -f1))"
