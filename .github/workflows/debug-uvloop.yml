@@ -1,0 +1,44 @@
+name: debug-uvloop
+
+on: workflow_dispatch
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Probe uvloop sdist build inside termux-docker
+        run: |
+          set -eu
+          mkdir -p ../out && chmod 0777 ../out
+          cat > ../out/probe.sh <<'EOS'
+          set -x
+          apt update -y
+          apt install -y git python clang make pkg-config curl ca-certificates patch which >/dev/null
+          PYBIN=python
+          if ! python -c 'import sys;raise SystemExit(0 if (3,11)<=sys.version_info[:2]<(3,14) else 1)' 2>/dev/null; then
+            pkg install -y tur-repo >/dev/null 2>&1 || true
+            pkg install -y python3.13 >/dev/null 2>&1 || true
+            PYBIN=python3.13
+          fi
+          export TMPDIR="$HOME/tmp"; mkdir -p "$TMPDIR"
+          $PYBIN -m venv "$HOME/benv"
+          . "$HOME/benv/bin/activate"
+          pip install --upgrade pip wheel setuptools >/dev/null
+          pip download uvloop==0.22.1 --no-binary :all: --no-deps -d "$TMPDIR/dl"
+          tar -xzf "$TMPDIR"/dl/uvloop-0.22.1.tar.gz -C "$TMPDIR"
+          cd "$TMPDIR/uvloop-0.22.1"
+          echo "== vendor/libuv top =="; ls -la vendor/libuv | head -20
+          echo "== configure perms =="; ls -la vendor/libuv/configure
+          export ANDROID_API_LEVEL=24
+          echo "== direct build_ext (system libuv) =="
+          pkg install -y libuv >/dev/null 2>&1 || true
+          $PYBIN setup.py build_ext --inplace --use-system-libuv 2>&1 | tail -8 || true
+          ls -la uvloop/loop*.so uvloop/*.so 2>/dev/null || echo "no .so from system-libuv path"
+          echo "== vendored configure run =="
+          (cd vendor/libuv && ./configure --help >/dev/null 2>&1 && echo "configure EXECUTABLE OK" || echo "configure RUN FAILED rc=$?")
+          EOS
+          chmod 0777 ../out/probe.sh
+          docker run --rm -v "$PWD:/workspace" -v "$PWD/../out:/out" -w /workspace \
+            termux/termux-docker:aarch64 bash /out/probe.sh
