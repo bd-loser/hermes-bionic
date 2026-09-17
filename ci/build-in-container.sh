@@ -24,7 +24,11 @@ export HERMES_UPSTREAM_REF
 echo "deb https://packages.termux.dev/apt/termux-main stable main" \
   > "${PREFIX:-/data/data/com.termux/files/usr}/etc/apt/sources.list"
 apt update -y
-apt install -y git python clang rust make pkg-config libffi openssl ca-certificates curl patch
+# libjpeg-turbo/zlib/libpng/freetype/libwebp: Pillow's C ext needs them and
+# its sdist build fails cryptically without (its setup.py prints the real
+# cause above "Failed building wheel for Pillow").
+apt install -y git python clang rust make pkg-config libffi openssl ca-certificates curl patch \
+  libjpeg-turbo zlib libpng freetype libwebp
 
 BUILD_ROOT="$HOME/hermes-build"
 rm -rf "$BUILD_ROOT"
