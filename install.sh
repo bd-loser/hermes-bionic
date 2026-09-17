@@ -26,7 +26,7 @@ say "Installing Termux prerequisites..."
 # runtime .so deps of the bundled wheels (cryptography, Pillow,
 # pillow-heif) — wheels link against the Termux system libs.
 pkg install -y python curl ca-certificates git ripgrep \
-  openssl libffi libjpeg-turbo libpng zlib freetype libwebp libheif >/dev/null \
+  openssl libffi libjpeg-turbo libpng zlib freetype libwebp libheif >/dev/null 2>&1 \
   || die "pkg install failed"
 
 # hermes needs CPython >=3.11,<3.14; Termux's default python may be newer.
@@ -91,7 +91,7 @@ say "Installing dependencies (from local wheels, nothing compiles)..."
 # pins.txt is the exact set CI resolved: == pins + --no-index makes the
 # phone-side resolution hermetic, so a newer PyPI release can never sneak
 # in an sdist that would compile on-device.
-"$VENV/bin/pip" install --no-index \
+"$VENV/bin/pip" install -q --no-index \
   --find-links "$HERMES_HOME/wheels/$PYMINOR" \
   -r "$HERMES_HOME/wheels/$PYMINOR/pins.txt"
 
@@ -111,7 +111,7 @@ else
   # shallow clones of a big repo flake on mobile networks (SSL EOF mid
   # fetch-pack) — retry instead of dying on the first attempt.
   for i in 1 2 3 4 5; do
-    if git clone --depth 1 --branch "v$VER" \
+    if git clone --quiet --depth 1 --branch "v$VER" \
       https://github.com/NousResearch/hermes-agent.git "$SRC"; then
       break
     fi
@@ -121,7 +121,7 @@ else
     sleep 10
   done
 fi
-"$VENV/bin/pip" install --no-index --no-deps --no-build-isolation \
+"$VENV/bin/pip" install -q --no-index --no-deps --no-build-isolation \
   --find-links "$HERMES_HOME/wheels/$PYMINOR" \
   -e "$SRC[termux]"
 
