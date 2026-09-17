@@ -1,0 +1,6 @@
+# CI-local only, never committed:
+# - ci-cache/ is the pip/cargo build cache persisted by actions/cache
+#   (mounted into termux-docker at /ci-cache).
+# - out-host.txt is the streamed docker log from build.yml's tee step.
+ci-cache/
+out-host.txt

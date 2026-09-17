@@ -6,6 +6,8 @@
 # ../ci-cache (persisted via actions/cache in build.yml) is mounted at
 # /ci-cache; the container script puts the pip wheel cache and the cargo
 # registry there so repeat builds skip finished compiles entirely.
+# NOTE: the host dir must live inside the workspace — actions/cache
+# rejects `..` in its paths, so `../ci-cache` is not an option.
 
 set -euo pipefail
 
@@ -15,7 +17,7 @@ mkdir -p "$GITHUB_WORKSPACE/../out"
 OUT_HOST="$(cd "$GITHUB_WORKSPACE/../out" && pwd)"
 chmod 0777 "$OUT_HOST"
 
-CACHE_HOST="$GITHUB_WORKSPACE/../ci-cache"
+CACHE_HOST="$GITHUB_WORKSPACE/ci-cache"
 mkdir -p "$CACHE_HOST"/{pip,pip-a,pip-b,cargo}
 chmod -R 777 "$CACHE_HOST"
 

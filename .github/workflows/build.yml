@@ -51,14 +51,16 @@ jobs:
       # didn't change since the last run is restored ready-made. Mounted
       # into termux-docker at /ci-cache (see build-on-runner.sh); restore-
       # keys are a prefix, so a new upstream version still reuses the bulk.
+      # NOTE: paths must live inside the workspace — actions/cache rejects
+      # `..` segments outright.
       - name: Restore build caches
         uses: actions/cache@v4
         with:
           path: |
-            ../ci-cache/pip
-            ../ci-cache/pip-a
-            ../ci-cache/pip-b
-            ../ci-cache/cargo
+            ci-cache/pip
+            ci-cache/pip-a
+            ci-cache/pip-b
+            ci-cache/cargo
           key: ci-cache-v1-${{ steps.v.outputs.version }}-${{ hashFiles('ci/build-in-container.sh') }}
           restore-keys: |
             ci-cache-v1-
