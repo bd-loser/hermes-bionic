@@ -91,9 +91,24 @@ say "Installing dependencies (from local wheels, nothing compiles)..."
 # pins.txt is the exact set CI resolved: == pins + --no-index makes the
 # phone-side resolution hermetic, so a newer PyPI release can never sneak
 # in an sdist that would compile on-device.
+# pip -q stays mute for a full minute here (78 wheels), which reads like a
+# hang; count installed .dist-info dirs to tick a compact progress line.
+PIP_LOG="$HERMES_HOME/install-pip.log"
+TOTAL_DEPS="$(grep -c . "$HERMES_HOME/wheels/$PYMINOR/pins.txt")"
+SITE="$VENV/lib/python$("$PYBIN" -c 'import sys;print(f"{sys.version_info.major}.{sys.version_info.minor}")')/site-packages"
 "$VENV/bin/pip" install -q --no-index \
   --find-links "$HERMES_HOME/wheels/$PYMINOR" \
-  -r "$HERMES_HOME/wheels/$PYMINOR/pins.txt"
+  -r "$HERMES_HOME/wheels/$PYMINOR/pins.txt" 2>"$PIP_LOG" &
+PIP_PID=$!
+while kill -0 "$PIP_PID" 2>/dev/null; do
+  sleep 3
+  if [[ -t 1 ]]; then
+    n="$(find "$SITE" -maxdepth 1 -name '*.dist-info' -type d 2>/dev/null | wc -l)"
+    printf '\r\033[2K\033[36m==>\033[0m installed %s/%s wheels...' "$n" "$TOTAL_DEPS"
+  fi
+done
+wait "$PIP_PID" || { echo; tail -15 "$PIP_LOG" >&2; die "pip dependency install failed (full log: $PIP_LOG)"; }
+[[ -t 1 ]] && printf '\r\033[2K' || true
 
 say "Installing hermes-agent itself (editable, from upstream git)..."
 # hermes-agent's setup.py refuses bdist_wheel/sdist outside Nix, so it is
