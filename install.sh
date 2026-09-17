@@ -3,9 +3,10 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/bd-loser/hermes-bionic/main/install.sh | bash
 #
-# Downloads the CI-built `.[termux]` wheel bundle (compiled in termux-docker
-# on ubuntu-24.04-arm) and pip-installs it into ~/.hermes/venv from local
-# wheels only. No on-device Rust/C builds, no uv, no proot.
+# Downloads the CI-built `.[termux]` dependency wheel bundle (compiled in
+# termux-docker on ubuntu-24.04-arm), clones the matching upstream release,
+# and installs everything into ~/.hermes/venv from local wheels only.
+# No on-device Rust/C builds, no uv, no proot.
 
 set -euo pipefail
 
@@ -21,7 +22,11 @@ die() { printf '\033[31mxx\033[0m %s\n' "$*" >&2; exit 1; }
   || die "run this inside Termux (PREFIX not set)"
 
 say "Installing Termux prerequisites..."
-pkg install -y python curl ca-certificates git ripgrep >/dev/null \
+# openssl/libffi/libjpeg-turbo/libpng/zlib/freetype/libwebp/libheif are
+# runtime .so deps of the bundled wheels (cryptography, Pillow,
+# pillow-heif) — wheels link against the Termux system libs.
+pkg install -y python curl ca-certificates git ripgrep \
+  openssl libffi libjpeg-turbo libpng zlib freetype libwebp libheif >/dev/null \
   || die "pkg install failed"
 
 # hermes needs CPython >=3.11,<3.14; Termux's default python may be newer.
@@ -78,14 +83,38 @@ say "Creating venv..."
 VENV="$HERMES_HOME/venv"
 rm -rf "$VENV"
 "$PYBIN" -m venv "$VENV"
-"$VENV/bin/pip" install --quiet --upgrade pip
+# setuptools+wheel up front: the editable install below runs with
+# --no-build-isolation (fully offline), so the backend must pre-exist.
+"$VENV/bin/pip" install --quiet --upgrade pip setuptools wheel
 
-say "Installing hermes-agent (from local wheels, nothing compiles)..."
-# constraints-termux.txt is unnecessary here: the bundle only contains the
-# CI-resolved, Android-tested versions, so --find-links is the constraint.
-"$VENV/bin/pip" install \
+say "Installing dependencies (from local wheels, nothing compiles)..."
+# pins.txt is the exact set CI resolved: == pins + --no-index makes the
+# phone-side resolution hermetic, so a newer PyPI release can never sneak
+# in an sdist that would compile on-device.
+"$VENV/bin/pip" install --no-index \
   --find-links "$HERMES_HOME/wheels/$PYMINOR" \
-  "hermes-agent[termux]"
+  -r "$HERMES_HOME/wheels/$PYMINOR/pins.txt"
+
+say "Installing hermes-agent itself (editable, from upstream git)..."
+# hermes-agent's setup.py refuses bdist_wheel/sdist outside Nix, so it is
+# NOT in the bundle; the editable (PEP 660) path is explicitly allowed by
+# its guard and needs no compilation (pure Python).
+VER="$(sed -n 's/^HERMES_VERSION=//p' "$HERMES_HOME/wheels/$PYMINOR/META.txt")"
+[ -n "$VER" ] || die "META.txt missing HERMES_VERSION in bundle"
+SRC="$HERMES_HOME/hermes-agent"
+if [ -d "$SRC/.git" ]; then
+  git -C "$SRC" fetch --quiet --depth 1 origin "refs/tags/v$VER:refs/tags/v$VER" || true
+  git -C "$SRC" checkout --quiet "v$VER" \
+    || die "cannot check out v$VER in $SRC"
+else
+  rm -rf "$SRC"
+  git clone --quiet --depth 1 --branch "v$VER" \
+    https://github.com/NousResearch/hermes-agent.git "$SRC" \
+    || die "git clone of hermes-agent v$VER failed"
+fi
+"$VENV/bin/pip" install --no-index --no-deps --no-build-isolation \
+  --find-links "$HERMES_HOME/wheels/$PYMINOR" \
+  -e "$SRC[termux]"
 
 ln -sf "$VENV/bin/hermes" "$PREFIX/bin/hermes"
 ln -sf "$VENV/bin/hermes-agent" "$PREFIX/bin/hermes-agent" 2>/dev/null || true

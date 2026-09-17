@@ -1,9 +1,16 @@
 #!/data/data/com.termux/files/usr/bin/bash
 # Runs INSIDE termux-docker (aarch64). Clones NousResearch/hermes-agent at
-# the pinned release tag and builds a COMPLETE wheel bundle for the
-# `.[termux]` extra, so phones never compile anything (Bionic-native wheels
+# the pinned release tag and builds a wheel bundle of its `.[termux]`
+# DEPENDENCIES, so phones never compile anything (Bionic-native wheels
 # for cryptography/pydantic-core/aiohttp/... are the whole reason this
 # exists).
+#
+# hermes-agent ITSELF is deliberately not wheelified: its setup.py refuses
+# bdist_wheel/sdist outside Nix (HERMES_NIX_BUILD guard). Phones install it
+# from the upstream git tag as an editable install (PEP 660 path the guard
+# explicitly allows), with every dependency resolved offline from this
+# bundle (pins.txt). This mirrors upstream's own Termux flow:
+#   pip install -e '.[termux]' -c constraints-termux.txt
 #
 # Env inputs (via /out/build-env.sh; the container entrypoint strips env):
 #   HERMES_VERSION     upstream release tag suffix, e.g. 2026.9.14 (tag v2026.9.14)
@@ -27,8 +34,9 @@ apt update -y
 # libjpeg-turbo/zlib/libpng/freetype/libwebp: Pillow's C ext needs them and
 # its sdist build fails cryptically without (its setup.py prints the real
 # cause above "Failed building wheel for Pillow").
-apt install -y git python clang rust make pkg-config libffi openssl ca-certificates curl patch \
-  libjpeg-turbo zlib libpng freetype libwebp
+# libheif: pillow-heif links it; the sdist build needs the headers + .pc.
+apt install -y git python clang rust make pkg-config libffi openssl ca-certificates curl patch jq \
+  libjpeg-turbo zlib libpng freetype libwebp libheif
 
 BUILD_ROOT="$HOME/hermes-build"
 rm -rf "$BUILD_ROOT"
@@ -80,6 +88,13 @@ mkdir -p "$TMPDIR"
 export ANDROID_API_LEVEL="${ANDROID_API_LEVEL:-24}"
 echo "→ ANDROID_API_LEVEL=$ANDROID_API_LEVEL"
 
+# autotools scripts (uvloop's vendored libuv ./configure) have a #!/bin/sh
+# shebang, but the image has no /bin/sh and we can't create one (non-root).
+# Point every shell lookup at the interpreter that actually exists.
+SH_BIN="$(command -v sh || command -v bash)"
+export SHELL="$SH_BIN" CONFIG_SHELL="$SH_BIN" INSTALL_SHELL="$SH_BIN"
+echo "→ SHELL=$SH_BIN"
+
 "$PYBIN" -m venv "$HOME/benv"
 # shellcheck disable=SC1091
 . "$HOME/benv/bin/activate"
@@ -90,10 +105,10 @@ WHEELS="$TMPDIR/$BUNDLE"
 mkdir -p "$WHEELS"
 
 # psutil's setup.py refuses sys.platform=="android" upstream. Termux ships
-# python-psutil 7.2.2 — the exact pin hermes-core declares — with an
-# android.patch; build that patched tree FIRST and hand it to the resolver
-# via --find-links so every psutil reference resolves to it (a local wheel
-# beats PyPI's sdist/wheels, which are glibc-tagged and unusable here).
+# python-psutil with an android.patch; build that patched tree FIRST and
+# hand it to the resolver via --find-links so every psutil reference
+# resolves to it (a local wheel beats PyPI's sdist, which can't build
+# here).
 PSUTIL_VER="7.2.2"
 PSUTIL_PATCH_COMMIT="d8e0fab40f58388602048fd349cd233b3b5d0169"
 PSUTIL_DIR="$TMPDIR/psutil-src"
@@ -106,15 +121,85 @@ echo "38f406bf21acc67e45f414b7980463b2e6e6270ba3616ffd41995d997078cbe6  $TMPDIR/
 tar -xzf "$TMPDIR/psutil.tar.gz" -C "$PSUTIL_DIR" --strip-components=1
 curl -fsSL "https://raw.githubusercontent.com/termux/termux-packages/$PSUTIL_PATCH_COMMIT/packages/python-psutil/android.patch" \
   -o "$TMPDIR/android.patch"
+# hard fail (no `|| true`): an unapplied patch means the platform refusal
+# resurfaces later as a cryptic build error.
 patch -d "$PSUTIL_DIR" -p1 -i "$TMPDIR/android.patch"
-pip wheel "$PSUTIL_DIR" -w "$TMPDIR/psutil-wheel"
+pip wheel --no-deps "$PSUTIL_DIR" -w "$TMPDIR/psutil-wheel"
 
-pip wheel "$BUILD_ROOT[termux]" \
+# uvloop vendors libuv and builds it with autotools ./configure. Same
+# /bin/sh problem as above, but exporting CONFIG_SHELL is not enough: the
+# failing exec is `['./configure', ...]`, launched directly by setup.py, so
+# the shebang is resolved by the kernel. Patch setup.py to invoke the
+# interpreter explicitly (validated on-device against this exact sdist).
+UVLOOP_PIN="$(grep -hoiE '^uvloop==[0-9][^;[:space:]]*' "$BUILD_ROOT/requirements.txt" "$BUILD_ROOT/constraints-termux.txt" 2>/dev/null | head -1 | cut -d= -f3 || true)"
+[ -n "$UVLOOP_PIN" ] || { echo "error: no uvloop== pin in requirements.txt/constraints-termux.txt" >&2; exit 1; }
+echo "→ vendored uvloop $UVLOOP_PIN"
+UVLOOP_SRC="$TMPDIR/uvloop-src"
+mkdir -p "$UVLOOP_SRC"
+pip download --no-deps --no-binary :all: "uvloop==$UVLOOP_PIN" -d "$UVLOOP_SRC"
+tar -xzf "$UVLOOP_SRC"/uvloop-*.tar.gz -C "$UVLOOP_SRC" --strip-components=1
+"$PYBIN" - "$UVLOOP_SRC/setup.py" <<'EOF'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+n = s.count("cmd = ['./configure'")
+assert n == 2, f"expected 2 configure sites, found {n}"
+s = s.replace("cmd = ['./configure'",
+              "cmd = [os.environ.get('CONFIG_SHELL', '/bin/sh'), './configure'")
+open(p, "w").write(s)
+print(f"uvloop setup.py patched ({n} sites)")
+EOF
+pip wheel --no-deps "$UVLOOP_SRC" -w "$TMPDIR/uvloop-wheel"
+
+# Resolve the full `.[termux]` graph WITHOUT building anything (dry-run +
+# install report), drop hermes-agent itself (wheel guard, installed from
+# git on-device), then wheel exactly that pinned set. The second pass hits
+# pip's wheel cache for everything resolved above, so native deps compile
+# once.
+"$PYBIN" -m pip install --dry-run --report "$TMPDIR/report.json" \
+  "$BUILD_ROOT[termux]" \
   -c "$BUILD_ROOT/constraints-termux.txt" \
-  -f "$TMPDIR/psutil-wheel" \
+  -f "$TMPDIR/psutil-wheel" -f "$TMPDIR/uvloop-wheel"
+"$PYBIN" - "$TMPDIR/report.json" "$TMPDIR/deps.txt" <<'EOF'
+import json, sys
+rep = json.load(open(sys.argv[1]))
+names = []
+for item in rep["install"]:
+    md = item["metadata"]
+    name, ver = md["name"], md["version"]
+    if name.lower().replace("-", "_") == "hermes_agent":
+        continue
+    names.append(f"{name}=={ver}")
+assert names, "empty dependency set — resolver found nothing?"
+open(sys.argv[2], "w").write("\n".join(names) + "\n")
+print(f"deps (minus hermes-agent): {len(names)}")
+EOF
+pip wheel -r "$TMPDIR/deps.txt" \
+  -c "$BUILD_ROOT/constraints-termux.txt" \
+  -f "$TMPDIR/psutil-wheel" -f "$TMPDIR/uvloop-wheel" \
   -w "$WHEELS"
 
-echo "$HERMES_VERSION" > "$WHEELS/HERMES_VERSION"
+# the patched wheels are inputs, not outputs — copy them into the bundle.
+cp "$TMPDIR"/psutil-wheel/*.whl "$TMPDIR"/uvloop-wheel/*.whl "$WHEELS"/
+
+# hard check: every resolved dep must have a wheel in the bundle.
+missing=0
+while IFS= read -r req; do
+  [ -n "$req" ] || continue
+  norm="$(printf '%s' "${req%%==*}" | tr '[:upper:]' '[:lower:]' | sed 's/[-_.][-_ .]*/_/g; s/[-_.]/_/g')"
+  if ! ls "$WHEELS" | grep -qi "^${norm}-"; then
+    echo "MISSING wheel for $req" >&2
+    missing=1
+  fi
+done < "$TMPDIR/deps.txt"
+[ "$missing" = 0 ] || { echo "error: bundle incomplete" >&2; exit 1; }
+echo "→ bundle complete: $(ls "$WHEELS"/*.whl | wc -l) wheels"
+
+cp "$TMPDIR/deps.txt" "$WHEELS/pins.txt"
+{
+  echo "HERMES_VERSION=$HERMES_VERSION"
+  echo "PYTHON_TAG=$PYTAG"
+} > "$WHEELS/META.txt"
 tar -czf "/out/$BUNDLE.tar.gz" -C "$TMPDIR" "$BUNDLE"
 ( cd /out && sha256sum "$BUNDLE.tar.gz" > "$BUNDLE.tar.gz.sha256" )
 ls -la /out/
