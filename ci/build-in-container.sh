@@ -212,7 +212,7 @@ cp "$TMPDIR"/psutil-wheel/*.whl "$TMPDIR"/uvloop-wheel/*.whl "$WHEELS"/
 missing=0
 while IFS= read -r req; do
   [ -n "$req" ] || continue
-  norm="$(printf '%s' "${req%%==*}" | tr '[:upper:]' '[:lower:]' | tr -s '-_.' '_')"
+  norm="$(printf '%s' "${req%%==*}" | tr '[:upper:]' '[:lower:]' | tr -s '._-' '_')"
   if ! ls "$WHEELS" | grep -qi "^${norm}-"; then
     echo "MISSING wheel for $req" >&2
     missing=1
