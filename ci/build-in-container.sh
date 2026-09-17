@@ -24,7 +24,7 @@ export HERMES_UPSTREAM_REF
 echo "deb https://packages.termux.dev/apt/termux-main stable main" \
   > "${PREFIX:-/data/data/com.termux/files/usr}/etc/apt/sources.list"
 apt update -y
-apt install -y git python clang rust make pkg-config libffi openssl ca-certificates curl
+apt install -y git python clang rust make pkg-config libffi openssl ca-certificates curl patch
 
 BUILD_ROOT="$HOME/hermes-build"
 rm -rf "$BUILD_ROOT"
@@ -85,8 +85,29 @@ BUNDLE="hermes-wheels-${HERMES_VERSION}-${PYTAG}"
 WHEELS="$TMPDIR/$BUNDLE"
 mkdir -p "$WHEELS"
 
+# psutil's setup.py refuses sys.platform=="android" upstream. Termux ships
+# python-psutil 7.2.2 — the exact pin hermes-core declares — with an
+# android.patch; build that patched tree FIRST and hand it to the resolver
+# via --find-links so every psutil reference resolves to it (a local wheel
+# beats PyPI's sdist/wheels, which are glibc-tagged and unusable here).
+PSUTIL_VER="7.2.2"
+PSUTIL_PATCH_COMMIT="d8e0fab40f58388602048fd349cd233b3b5d0169"
+PSUTIL_DIR="$TMPDIR/psutil-src"
+mkdir -p "$PSUTIL_DIR"
+curl -fsSL -o "$TMPDIR/psutil.tar.gz" \
+  "https://github.com/giampaolo/psutil/archive/refs/tags/release-$PSUTIL_VER.tar.gz"
+# sha256 from termux-packages/packages/python-psutil/build.sh
+echo "38f406bf21acc67e45f414b7980463b2e6e6270ba3616ffd41995d997078cbe6  $TMPDIR/psutil.tar.gz" \
+  | sha256sum -c -
+tar -xzf "$TMPDIR/psutil.tar.gz" -C "$PSUTIL_DIR" --strip-components=1
+curl -fsSL "https://raw.githubusercontent.com/termux/termux-packages/$PSUTIL_PATCH_COMMIT/packages/python-psutil/android.patch" \
+  -o "$TMPDIR/android.patch"
+patch -d "$PSUTIL_DIR" -p1 -i "$TMPDIR/android.patch"
+pip wheel "$PSUTIL_DIR" -w "$TMPDIR/psutil-wheel"
+
 pip wheel "$BUILD_ROOT[termux]" \
   -c "$BUILD_ROOT/constraints-termux.txt" \
+  -f "$TMPDIR/psutil-wheel" \
   -w "$WHEELS"
 
 echo "$HERMES_VERSION" > "$WHEELS/HERMES_VERSION"
