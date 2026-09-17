@@ -187,19 +187,21 @@ pip wheel --no-deps "$UVLOOP_SRC" -w "$TMPDIR/uvloop-wheel"
 # parallel (separate pip caches; same output dir, disjoint filenames).
 split -n l/2 -d "$TMPDIR/deps.txt" "$TMPDIR/half-"
 wheel_half() {
-  # $1 = half file, $2 = cache dir, $3 = log file
-  PIP_CACHE_DIR="$2" pip wheel -r "$1" \
+  # $1 = half file, $2 = cache dir, $3 = tag printed before every line.
+  # Streams LIVE with a tag prefix: backgrounded halves that only print
+  # at the end look like a hung job in the Actions log.
+  PIP_CACHE_DIR="$2" "$PYBIN" -u -m pip wheel -r "$1" \
     -c "$BUILD_ROOT/constraints-termux.txt" \
     -f "$TMPDIR/psutil-wheel" -f "$TMPDIR/uvloop-wheel" \
-    -w "$WHEELS" >"$3" 2>&1
+    -w "$WHEELS" 2>&1 | sed -u "s/^/[$3] /"
 }
-wheel_half "$TMPDIR/half-00" "$TMPDIR/pipecache-a" "$TMPDIR/wheel-a.log" &
+wheel_half "$TMPDIR/half-00" "$TMPDIR/pipecache-a" A &
 PID_A=$!
-wheel_half "$TMPDIR/half-01" "$TMPDIR/pipecache-b" "$TMPDIR/wheel-b.log" &
+wheel_half "$TMPDIR/half-01" "$TMPDIR/pipecache-b" B &
 PID_B=$!
 FAIL=0
-wait "$PID_A" || { echo "--- half A failed:"; tail -25 "$TMPDIR/wheel-a.log"; FAIL=1; }
-wait "$PID_B" || { echo "--- half B failed:"; tail -25 "$TMPDIR/wheel-b.log"; FAIL=1; }
+wait "$PID_A" || { echo "half A failed (see [A] lines above)"; FAIL=1; }
+wait "$PID_B" || { echo "half B failed (see [B] lines above)"; FAIL=1; }
 [ "$FAIL" = 0 ] || { echo "error: wheel build failed" >&2; exit 1; }
 echo "→ both halves done"
 
