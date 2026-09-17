@@ -108,9 +108,18 @@ if [ -d "$SRC/.git" ]; then
     || die "cannot check out v$VER in $SRC"
 else
   rm -rf "$SRC"
-  git clone --quiet --depth 1 --branch "v$VER" \
-    https://github.com/NousResearch/hermes-agent.git "$SRC" \
-    || die "git clone of hermes-agent v$VER failed"
+  # shallow clones of a big repo flake on mobile networks (SSL EOF mid
+  # fetch-pack) — retry instead of dying on the first attempt.
+  for i in 1 2 3 4 5; do
+    if git clone --depth 1 --branch "v$VER" \
+      https://github.com/NousResearch/hermes-agent.git "$SRC"; then
+      break
+    fi
+    rm -rf "$SRC"
+    [ "$i" = 5 ] && die "git clone of hermes-agent v$VER failed after 5 attempts"
+    warn "clone attempt $i failed, retrying in 10s..."
+    sleep 10
+  done
 fi
 "$VENV/bin/pip" install --no-index --no-deps --no-build-isolation \
   --find-links "$HERMES_HOME/wheels/$PYMINOR" \
