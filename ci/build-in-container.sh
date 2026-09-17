@@ -104,6 +104,17 @@ SH_BIN="$(command -v sh || command -v bash)"
 export SHELL="$SH_BIN" CONFIG_SHELL="$SH_BIN" INSTALL_SHELL="$SH_BIN"
 echo "→ SHELL=$SH_BIN"
 
+# Rust cdylibs built with pyo3's `extension-module` feature (cryptography's
+# setuptools-rust build) deliberately do NOT link libpython — fine on glibc
+# (undefined Py symbols resolve against the hosting interpreter), fatal on
+# Bionic (Android's linker never resolves dlopened libs against the
+# executable → "cannot locate symbol PyModule_Type" at import). Force the
+# link explicitly; harmless for builds that already link it (maturin).
+# Reaches isolated PEP 517 builds too (pip passes RUSTFLAGS through).
+PYVER="$("$PYBIN" -c 'import sys;print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+export RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-L${PREFIX:-/data/data/com.termux/files/usr}/lib -C link-arg=-lpython$PYVER"
+echo "→ RUSTFLAGS=$RUSTFLAGS"
+
 "$PYBIN" -m venv "$HOME/benv"
 # shellcheck disable=SC1091
 . "$HOME/benv/bin/activate"
