@@ -38,7 +38,10 @@ jobs:
         env:
           HERMES_VERSION: ${{ steps.v.outputs.version }}
           HERMES_UPSTREAM_REF: ${{ inputs.upstream_ref }}
-        run: bash ci/build-on-runner.sh > out-host.txt && cat out-host.txt
+        # tee, not `>`: docker progress streams into the Actions log live.
+        run: |
+          set -o pipefail
+          bash ci/build-on-runner.sh 2>&1 | tee out-host.txt
 
       - name: Publish release
         env:
@@ -47,7 +50,7 @@ jobs:
           PRERELEASE: ${{ inputs.prerelease }}
         run: |
           set -eu
-          OUT_HOST="$(tail -n1 out-host.txt)"
+          OUT_HOST="$GITHUB_WORKSPACE/../out"
           TAG="v$VERSION"
           if [ "$PRERELEASE" = "true" ]; then FLAGS="--prerelease"; else FLAGS=""; fi
           if gh release view "$TAG" >/dev/null 2>&1; then

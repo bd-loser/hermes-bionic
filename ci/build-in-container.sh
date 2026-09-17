@@ -69,10 +69,17 @@ echo "→ building wheels for $PYTAG ($PYBIN), hermes $HERMES_VERSION"
 export TMPDIR="$HOME/tmp"
 mkdir -p "$TMPDIR"
 
+# maturin-based wheels (firecrawl-anydoc, pydantic-core, ...) refuse to
+# build on Android without an explicit API level; on-device this comes from
+# `getprop`, the container has none. API 24 keeps the wheels loadable on the
+# widest range of devices.
+export ANDROID_API_LEVEL="${ANDROID_API_LEVEL:-24}"
+echo "→ ANDROID_API_LEVEL=$ANDROID_API_LEVEL"
+
 "$PYBIN" -m venv "$HOME/benv"
 # shellcheck disable=SC1091
 . "$HOME/benv/bin/activate"
-pip install --quiet --upgrade pip wheel
+pip install --upgrade pip wheel
 
 BUNDLE="hermes-wheels-${HERMES_VERSION}-${PYTAG}"
 WHEELS="$TMPDIR/$BUNDLE"
