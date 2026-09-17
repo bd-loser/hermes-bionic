@@ -39,8 +39,29 @@ else
     https://github.com/NousResearch/hermes-agent.git "$BUILD_ROOT"
 fi
 
-PYTAG="cp$(python -c 'import sys;print(f"{sys.version_info.major}{sys.version_info.minor}")')"
-echo "→ building wheels for $PYTAG, hermes $HERMES_VERSION"
+PYTAG=""
+pick_python() {
+  # hermes requires-python is >=3.11,<3.14; termux's default python may sit
+  # outside it (3.14.x). Same fallback ladder as upstream's installer:
+  # TUR publishes versioned CPythons (python3.13 = the one phones get).
+  local p
+  if python -c 'import sys;raise SystemExit(0 if (3,11)<=sys.version_info[:2]<(3,14) else 1)' 2>/dev/null; then
+    printf python; return
+  fi
+  pkg install -y tur-repo >/dev/null 2>&1 || true
+  for p in python3.13 python3.12 python3.11; do
+    pkg install -y "$p" >/dev/null 2>&1 || continue
+    command -v "$p" >/dev/null || continue
+    if "$p" -c 'import sys;raise SystemExit(0 if (3,11)<=sys.version_info[:2]<(3,14) else 1)' 2>/dev/null; then
+      printf '%s' "$p"; return
+    fi
+  done
+  printf none
+}
+PYBIN="$(pick_python)"
+[ "$PYBIN" != none ] || { echo "error: no Python 3.11-3.13 available (TUR install failed?)" >&2; exit 1; }
+PYTAG="cp$("$PYBIN" -c 'import sys;print(f"{sys.version_info.major}{sys.version_info.minor}")')"
+echo "→ building wheels for $PYTAG ($PYBIN), hermes $HERMES_VERSION"
 
 # termux-docker has no /tmp for the unprivileged `system` user; Termux
 # convention is $PREFIX/tmp. Everything that reaches for a scratch dir
@@ -48,7 +69,7 @@ echo "→ building wheels for $PYTAG, hermes $HERMES_VERSION"
 export TMPDIR="$HOME/tmp"
 mkdir -p "$TMPDIR"
 
-python -m venv "$HOME/benv"
+"$PYBIN" -m venv "$HOME/benv"
 # shellcheck disable=SC1091
 . "$HOME/benv/bin/activate"
 pip install --quiet --upgrade pip wheel

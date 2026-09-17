@@ -20,12 +20,33 @@ die() { printf '\033[31mxx\033[0m %s\n' "$*" >&2; exit 1; }
 [ -n "${PREFIX:-}" ] && [[ "$PREFIX" == *com.termux* ]] \
   || die "run this inside Termux (PREFIX not set)"
 
-PYMINOR="cp$(python -c 'import sys;print(f"{sys.version_info.major}{sys.version_info.minor}")")"
-say "Python: $(python --version) ($PYMINOR)"
-
 say "Installing Termux prerequisites..."
 pkg install -y python curl ca-certificates git ripgrep >/dev/null \
   || die "pkg install failed"
+
+# hermes needs CPython >=3.11,<3.14; Termux's default python may be newer.
+# TUR publishes versioned interpreters (python3.13) — same ladder upstream
+# uses. The venv is pinned to whichever we pick, so a later `pkg upgrade`
+# of default python won't break the install.
+pick_python() {
+  local p
+  if python -c 'import sys;raise SystemExit(0 if (3,11)<=sys.version_info[:2]<(3,14) else 1)' 2>/dev/null; then
+    printf python; return
+  fi
+  pkg install -y tur-repo >/dev/null 2>&1 || true
+  for p in python3.13 python3.12 python3.11; do
+    pkg install -y "$p" >/dev/null 2>&1 || continue
+    command -v "$p" >/dev/null || continue
+    if "$p" -c 'import sys;raise SystemExit(0 if (3,11)<=sys.version_info[:2]<(3,14) else 1)' 2>/dev/null; then
+      printf '%s' "$p"; return
+    fi
+  done
+  printf none
+}
+PYBIN="$(pick_python)"
+[ "$PYBIN" != none ] || die "no Python 3.11-3.13 found. Try: pkg install tur-repo && pkg install python3.13"
+PYMINOR="cp$("$PYBIN" -c 'import sys;print(f"{sys.version_info.major}{sys.version_info.minor}")')"
+say "Python: $("$PYBIN" --version) ($PYMINOR)"
 
 say "Resolving latest $REPO release..."
 TAG="$(curl -fsSL "$API/releases/latest" 2>/dev/null \
@@ -40,8 +61,8 @@ trap 'rm -rf "$TMP"' EXIT
 curl -fsSL -o "$TMP/$ASSET" \
   "https://github.com/$REPO/releases/download/$TAG/$ASSET" \
   || die "no $ASSET in $TAG — your Termux Python ($PYMINOR) has no prebuilt bundle;
-   install a matching one with 'pkg install python' or run upstream:
-   curl -fsSL https://hermes-usercontent.nousresearch.com/install.sh | bash"
+   install a matching one (e.g. 'pkg install tur-repo && pkg install python3.13') or run upstream:
+   curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash"
 curl -fsSL -o "$TMP/$ASSET.sha256" \
   "https://github.com/$REPO/releases/download/$TAG/$ASSET.sha256" \
   && ( cd "$TMP" && sha256sum -c "$ASSET.sha256" ) \
@@ -56,7 +77,7 @@ tar -xzf "$TMP/$ASSET" --strip-components=1 -C "$HERMES_HOME/wheels/$PYMINOR"
 say "Creating venv..."
 VENV="$HERMES_HOME/venv"
 rm -rf "$VENV"
-python -m venv "$VENV"
+"$PYBIN" -m venv "$VENV"
 "$VENV/bin/pip" install --quiet --upgrade pip
 
 say "Installing hermes-agent (from local wheels, nothing compiles)..."
