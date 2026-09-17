@@ -12,6 +12,15 @@
 # bundle (pins.txt). This mirrors upstream's own Termux flow:
 #   pip install -e '.[termux]' -c constraints-termux.txt
 #
+# Build order (each step feeds the next):
+#   1. patched psutil wheel (platform refusal) → find-links dir
+#   2. dry-run + install report → exact dep list (deps.txt/pins.txt);
+#      this also tells us the uvloop version (transitive via uvicorn,
+#      no == pin upstream to read)
+#   3. patched uvloop wheel at that exact version → find-links dir
+#   4. `pip wheel -r deps.txt` in TWO PARALLEL halves (serial native
+#      compiles are what made this job take 40+ min)
+#
 # Env inputs (via /out/build-env.sh; the container entrypoint strips env):
 #   HERMES_VERSION     upstream release tag suffix, e.g. 2026.9.14 (tag v2026.9.14)
 #   HERMES_UPSTREAM_REF optional; branch/commit to build instead of the tag
@@ -126,13 +135,35 @@ curl -fsSL "https://raw.githubusercontent.com/termux/termux-packages/$PSUTIL_PAT
 patch -d "$PSUTIL_DIR" -p1 -i "$TMPDIR/android.patch"
 pip wheel --no-deps "$PSUTIL_DIR" -w "$TMPDIR/psutil-wheel"
 
+# Resolve the full `.[termux]` graph WITHOUT building anything (dry-run +
+# install report). This produces the exact pinned set AND reveals the
+# uvloop version (transitive dep, no upstream == pin to read).
+"$PYBIN" -m pip install --dry-run --report "$TMPDIR/report.json" \
+  "$BUILD_ROOT[termux]" \
+  -c "$BUILD_ROOT/constraints-termux.txt" \
+  -f "$TMPDIR/psutil-wheel"
+"$PYBIN" - "$TMPDIR/report.json" "$TMPDIR/deps.txt" <<'EOF'
+import json, sys
+rep = json.load(open(sys.argv[1]))
+names = []
+for item in rep["install"]:
+    md = item["metadata"]
+    name, ver = md["name"], md["version"]
+    if name.lower().replace("-", "_") == "hermes_agent":
+        continue
+    names.append(f"{name}=={ver}")
+assert names, "empty dependency set — resolver found nothing?"
+open(sys.argv[2], "w").write("\n".join(names) + "\n")
+print(f"deps (minus hermes-agent): {len(names)}")
+EOF
+UVLOOP_PIN="$(grep -i '^uvloop==' "$TMPDIR/deps.txt" | head -1 | cut -d= -f3 || true)"
+[ -n "$UVLOOP_PIN" ] || { echo "error: resolver did not select uvloop" >&2; exit 1; }
+
 # uvloop vendors libuv and builds it with autotools ./configure. Same
 # /bin/sh problem as above, but exporting CONFIG_SHELL is not enough: the
 # failing exec is `['./configure', ...]`, launched directly by setup.py, so
 # the shebang is resolved by the kernel. Patch setup.py to invoke the
 # interpreter explicitly (validated on-device against this exact sdist).
-UVLOOP_PIN="$(grep -hoiE '^uvloop==[0-9][^;[:space:]]*' "$BUILD_ROOT/requirements.txt" "$BUILD_ROOT/constraints-termux.txt" 2>/dev/null | head -1 | cut -d= -f3 || true)"
-[ -n "$UVLOOP_PIN" ] || { echo "error: no uvloop== pin in requirements.txt/constraints-termux.txt" >&2; exit 1; }
 echo "→ vendored uvloop $UVLOOP_PIN"
 UVLOOP_SRC="$TMPDIR/uvloop-src"
 mkdir -p "$UVLOOP_SRC"
@@ -151,33 +182,26 @@ print(f"uvloop setup.py patched ({n} sites)")
 EOF
 pip wheel --no-deps "$UVLOOP_SRC" -w "$TMPDIR/uvloop-wheel"
 
-# Resolve the full `.[termux]` graph WITHOUT building anything (dry-run +
-# install report), drop hermes-agent itself (wheel guard, installed from
-# git on-device), then wheel exactly that pinned set. The second pass hits
-# pip's wheel cache for everything resolved above, so native deps compile
-# once.
-"$PYBIN" -m pip install --dry-run --report "$TMPDIR/report.json" \
-  "$BUILD_ROOT[termux]" \
-  -c "$BUILD_ROOT/constraints-termux.txt" \
-  -f "$TMPDIR/psutil-wheel" -f "$TMPDIR/uvloop-wheel"
-"$PYBIN" - "$TMPDIR/report.json" "$TMPDIR/deps.txt" <<'EOF'
-import json, sys
-rep = json.load(open(sys.argv[1]))
-names = []
-for item in rep["install"]:
-    md = item["metadata"]
-    name, ver = md["name"], md["version"]
-    if name.lower().replace("-", "_") == "hermes_agent":
-        continue
-    names.append(f"{name}=={ver}")
-assert names, "empty dependency set — resolver found nothing?"
-open(sys.argv[2], "w").write("\n".join(names) + "\n")
-print(f"deps (minus hermes-agent): {len(names)}")
-EOF
-pip wheel -r "$TMPDIR/deps.txt" \
-  -c "$BUILD_ROOT/constraints-termux.txt" \
-  -f "$TMPDIR/psutil-wheel" -f "$TMPDIR/uvloop-wheel" \
-  -w "$WHEELS"
+# Wheel the pinned set. Native compiles run serially inside one pip, which
+# is what made this job take 40+ min — so split into halves built in
+# parallel (separate pip caches; same output dir, disjoint filenames).
+split -n l/2 -d "$TMPDIR/deps.txt" "$TMPDIR/half-"
+wheel_half() {
+  # $1 = half file, $2 = cache dir, $3 = log file
+  PIP_CACHE_DIR="$2" pip wheel -r "$1" \
+    -c "$BUILD_ROOT/constraints-termux.txt" \
+    -f "$TMPDIR/psutil-wheel" -f "$TMPDIR/uvloop-wheel" \
+    -w "$WHEELS" >"$3" 2>&1
+}
+wheel_half "$TMPDIR/half-00" "$TMPDIR/pipecache-a" "$TMPDIR/wheel-a.log" &
+PID_A=$!
+wheel_half "$TMPDIR/half-01" "$TMPDIR/pipecache-b" "$TMPDIR/wheel-b.log" &
+PID_B=$!
+FAIL=0
+wait "$PID_A" || { echo "--- half A failed:"; tail -25 "$TMPDIR/wheel-a.log"; FAIL=1; }
+wait "$PID_B" || { echo "--- half B failed:"; tail -25 "$TMPDIR/wheel-b.log"; FAIL=1; }
+[ "$FAIL" = 0 ] || { echo "error: wheel build failed" >&2; exit 1; }
+echo "→ both halves done"
 
 # the patched wheels are inputs, not outputs — copy them into the bundle.
 cp "$TMPDIR"/psutil-wheel/*.whl "$TMPDIR"/uvloop-wheel/*.whl "$WHEELS"/
@@ -186,7 +210,7 @@ cp "$TMPDIR"/psutil-wheel/*.whl "$TMPDIR"/uvloop-wheel/*.whl "$WHEELS"/
 missing=0
 while IFS= read -r req; do
   [ -n "$req" ] || continue
-  norm="$(printf '%s' "${req%%==*}" | tr '[:upper:]' '[:lower:]' | sed 's/[-_.][-_ .]*/_/g; s/[-_.]/_/g')"
+  norm="$(printf '%s' "${req%%==*}" | tr '[:upper:]' '[:lower:]' | tr -s '-_.' '_')"
   if ! ls "$WHEELS" | grep -qi "^${norm}-"; then
     echo "MISSING wheel for $req" >&2
     missing=1
