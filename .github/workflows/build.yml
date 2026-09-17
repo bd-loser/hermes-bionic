@@ -1,0 +1,61 @@
+name: build
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Hermes release to build (blank = versions.json)"
+        required: false
+        default: ""
+      upstream_ref:
+        description: "Build from this branch/commit/tag instead of the pinned release"
+        required: false
+        default: ""
+      prerelease:
+        description: "Publish the wheel-bundle release as prerelease"
+        type: boolean
+        default: false
+
+jobs:
+  wheels:
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: write
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: v
+        run: |
+          set -eu
+          VERSION="${{ inputs.version }}"
+          [ -z "$VERSION" ] && VERSION="$(jq -r .hermes versions.json)"
+          echo "version=${VERSION#v}" >> "$GITHUB_OUTPUT"
+          echo "Building hermes-agent ${VERSION#v}"
+
+      - name: Build wheel bundle in termux-docker
+        env:
+          HERMES_VERSION: ${{ steps.v.outputs.version }}
+          HERMES_UPSTREAM_REF: ${{ inputs.upstream_ref }}
+        run: bash ci/build-on-runner.sh > out-host.txt && cat out-host.txt
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.v.outputs.version }}
+          PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          set -eu
+          OUT_HOST="$(tail -n1 out-host.txt)"
+          TAG="v$VERSION"
+          if [ "$PRERELEASE" = "true" ]; then FLAGS="--prerelease"; else FLAGS=""; fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$OUT_HOST"/hermes-wheels-*.tar.gz* --clobber
+          else
+            # shellcheck disable=SC2086
+            gh release create "$TAG" $FLAGS \
+              --title "hermes-agent $VERSION (Termux wheels)" \
+              --notes "Prebuilt \`.[termux]\` wheel bundle for Termux/Bionic aarch64, compiled in termux-docker. Install with the repo install.sh — nothing compiles on-device." \
+              "$OUT_HOST"/hermes-wheels-*.tar.gz "$OUT_HOST"/hermes-wheels-*.tar.gz.sha256
+          fi
