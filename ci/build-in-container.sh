@@ -128,16 +128,23 @@ mkdir -p "$WHEELS"
 # python-psutil with an android.patch; build that patched tree FIRST and
 # hand it to the resolver via --find-links so every psutil reference
 # resolves to it (a local wheel beats PyPI's sdist, which can't build
-# here).
-PSUTIL_VER="7.2.2"
+# here). Version comes from hermes' own pin so the vendored wheel always
+# matches what the resolver will pick.
+PSUTIL_VER="$(sed -n 's/.*"psutil==\([0-9][0-9.]*\)".*/\1/p' "$BUILD_ROOT/pyproject.toml" | head -1)"
+[ -n "$PSUTIL_VER" ] || { echo "error: could not parse psutil== pin from upstream pyproject.toml" >&2; exit 1; }
+echo "→ vendored psutil $PSUTIL_VER (parsed from upstream pyproject.toml)"
 PSUTIL_PATCH_COMMIT="d8e0fab40f58388602048fd349cd233b3b5d0169"
 PSUTIL_DIR="$TMPDIR/psutil-src"
 mkdir -p "$PSUTIL_DIR"
 curl -fsSL -o "$TMPDIR/psutil.tar.gz" \
   "https://github.com/giampaolo/psutil/archive/refs/tags/release-$PSUTIL_VER.tar.gz"
-# sha256 from termux-packages/packages/python-psutil/build.sh
-echo "38f406bf21acc67e45f414b7980463b2e6e6270ba3616ffd41995d997078cbe6  $TMPDIR/psutil.tar.gz" \
-  | sha256sum -c -
+if [ "$PSUTIL_VER" = "7.2.2" ]; then
+  # sha256 from termux-packages/packages/python-psutil/build.sh
+  echo "38f406bf21acc67e45f414b7980463b2e6e6270ba3616ffd41995d997078cbe6  $TMPDIR/psutil.tar.gz" \
+    | sha256sum -c -
+else
+  echo "WARNING: no pinned sha256 for psutil $PSUTIL_VER — proceeding on https only" >&2
+fi
 tar -xzf "$TMPDIR/psutil.tar.gz" -C "$PSUTIL_DIR" --strip-components=1
 curl -fsSL "https://raw.githubusercontent.com/termux/termux-packages/$PSUTIL_PATCH_COMMIT/packages/python-psutil/android.patch" \
   -o "$TMPDIR/android.patch"
@@ -195,7 +202,17 @@ pip wheel --no-deps "$UVLOOP_SRC" -w "$TMPDIR/uvloop-wheel"
 
 # Wheel the pinned set. Native compiles run serially inside one pip, which
 # is what made this job take 40+ min — so split into halves built in
-# parallel (separate pip caches; same output dir, disjoint filenames).
+# parallel (same output dir, disjoint filenames; separate pip caches, also
+# disjoint — pip's cache is not concurrent-safe). Caches live on the
+# persisted /ci-cache mount when present, so unchanged deps come back
+# pre-built on the next run.
+if [ -d /ci-cache ]; then
+  CACHE_A=/ci-cache/pip-a
+  CACHE_B=/ci-cache/pip-b
+else
+  CACHE_A="$TMPDIR/pipecache-a"
+  CACHE_B="$TMPDIR/pipecache-b"
+fi
 split -n l/2 -d "$TMPDIR/deps.txt" "$TMPDIR/half-"
 wheel_half() {
   # $1 = half file, $2 = cache dir, $3 = tag printed before every line.
@@ -206,9 +223,9 @@ wheel_half() {
     -f "$TMPDIR/psutil-wheel" -f "$TMPDIR/uvloop-wheel" \
     -w "$WHEELS" 2>&1 | sed -u "s/^/[$3] /"
 }
-wheel_half "$TMPDIR/half-00" "$TMPDIR/pipecache-a" A &
+wheel_half "$TMPDIR/half-00" "$CACHE_A" A &
 PID_A=$!
-wheel_half "$TMPDIR/half-01" "$TMPDIR/pipecache-b" B &
+wheel_half "$TMPDIR/half-01" "$CACHE_B" B &
 PID_B=$!
 FAIL=0
 wait "$PID_A" || { echo "half A failed (see [A] lines above)"; FAIL=1; }

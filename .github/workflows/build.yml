@@ -15,6 +15,17 @@ on:
         description: "Publish the wheel-bundle release as prerelease"
         type: boolean
         default: false
+      draft:
+        description: "Create the release as a draft"
+        type: boolean
+        default: false
+
+concurrency:
+  # Serializes publishes: two builds resolving the same tag would race on
+  # the release upload. Different versions share the group too — a phone
+  # installs exactly one bundle, so overlapping builds add no value.
+  group: build
+  cancel-in-progress: false
 
 jobs:
   wheels:
@@ -34,6 +45,24 @@ jobs:
           echo "version=${VERSION#v}" >> "$GITHUB_OUTPUT"
           echo "Building hermes-agent ${VERSION#v}"
 
+      # The pip/cargo caches are the difference between a ~30 min build and
+      # a minutes-long one: pip's wheel cache is content-addressed, so every
+      # native wheel (cryptography, pydantic-core, uvloop, Pillow, ...) that
+      # didn't change since the last run is restored ready-made. Mounted
+      # into termux-docker at /ci-cache (see build-on-runner.sh); restore-
+      # keys are a prefix, so a new upstream version still reuses the bulk.
+      - name: Restore build caches
+        uses: actions/cache@v4
+        with:
+          path: |
+            ../ci-cache/pip
+            ../ci-cache/pip-a
+            ../ci-cache/pip-b
+            ../ci-cache/cargo
+          key: ci-cache-v1-${{ steps.v.outputs.version }}-${{ hashFiles('ci/build-in-container.sh') }}
+          restore-keys: |
+            ci-cache-v1-
+
       - name: Build wheel bundle in termux-docker
         env:
           HERMES_VERSION: ${{ steps.v.outputs.version }}
@@ -48,17 +77,20 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.v.outputs.version }}
           PRERELEASE: ${{ inputs.prerelease }}
+          DRAFT: ${{ inputs.draft }}
         run: |
           set -eu
           OUT_HOST="$GITHUB_WORKSPACE/../out"
           TAG="v$VERSION"
-          if [ "$PRERELEASE" = "true" ]; then FLAGS="--prerelease"; else FLAGS=""; fi
+          FLAGS=""
+          [ "$PRERELEASE" = "true" ] && FLAGS="$FLAGS --prerelease"
+          [ "$DRAFT" = "true" ] && FLAGS="$FLAGS --draft"
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "$OUT_HOST"/hermes-wheels-*.tar.gz* --clobber
           else
             # shellcheck disable=SC2086
             gh release create "$TAG" $FLAGS \
               --title "hermes-agent $VERSION (Termux wheels)" \
-              --notes "Prebuilt \`.[termux]\` wheel bundle for Termux/Bionic aarch64, compiled in termux-docker. Install with the repo install.sh — nothing compiles on-device." \
+              --notes "Prebuilt \`.[termux]\` dependency wheel bundle for Termux/Bionic aarch64, compiled in termux-docker. Install with the repo install.sh — dependencies resolve from local wheels; only hermes-agent itself is installed from its upstream git tag." \
               "$OUT_HOST"/hermes-wheels-*.tar.gz "$OUT_HOST"/hermes-wheels-*.tar.gz.sha256
           fi
