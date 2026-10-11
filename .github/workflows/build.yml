@@ -52,7 +52,10 @@ jobs:
       # into termux-docker at /ci-cache (see build-on-runner.sh); restore-
       # keys are a prefix, so a new upstream version still reuses the bulk.
       # NOTE: paths must live inside the workspace — actions/cache rejects
-      # `..` segments outright.
+      # `..` segments outright. The key is version-tagged for the same
+      # reason: v1 holds cp313 artifacts, and restore-keys fall back to any
+      # earlier entry, so a stale python's wheels would otherwise be
+      # picked up as if they were built for this run.
       - name: Restore build caches
         uses: actions/cache@v4
         with:
@@ -61,9 +64,9 @@ jobs:
             ci-cache/pip-a
             ci-cache/pip-b
             ci-cache/cargo
-          key: ci-cache-v1-${{ steps.v.outputs.version }}-${{ hashFiles('ci/build-in-container.sh') }}
+          key: ci-cache-v2-${{ steps.v.outputs.version }}-${{ hashFiles('ci/build-in-container.sh') }}
           restore-keys: |
-            ci-cache-v1-
+            ci-cache-v2-
 
       - name: Build wheel bundle in termux-docker
         env:

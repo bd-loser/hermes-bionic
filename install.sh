@@ -29,27 +29,28 @@ pkg install -y python curl ca-certificates git ripgrep \
   openssl libffi libjpeg-turbo libpng zlib freetype libwebp libheif >/dev/null 2>&1 \
   || die "pkg install failed"
 
-# hermes needs CPython >=3.11,<3.14; Termux's default python may be newer.
-# TUR publishes versioned interpreters (python3.13) — same ladder upstream
-# uses. The venv is pinned to whichever we pick, so a later `pkg upgrade`
-# of default python won't break the install.
+# hermes pins every dependency as `==X.Y.Z; python_version >= '3.14'`.
+# Below 3.14 those markers do not apply, so the bundle must be — and be
+# installed on — 3.14. Termux's main repo ships python 3.14.x; the venv is
+# pinned to whichever we pick, so a later `pkg upgrade` of default python
+# won't break the install.
+want_314() {
+  "$1" -c 'import sys;raise SystemExit(0 if (3,14)<=sys.version_info[:2]<(3,15) else 1)' 2>/dev/null
+}
 pick_python() {
   local p
-  if python -c 'import sys;raise SystemExit(0 if (3,11)<=sys.version_info[:2]<(3,14) else 1)' 2>/dev/null; then
-    printf python; return
-  fi
+  if want_314 python; then printf python; return; fi
   pkg install -y tur-repo >/dev/null 2>&1 || true
-  for p in python3.13 python3.12 python3.11; do
+  for p in python3.14 python3.15; do
     pkg install -y "$p" >/dev/null 2>&1 || continue
     command -v "$p" >/dev/null || continue
-    if "$p" -c 'import sys;raise SystemExit(0 if (3,11)<=sys.version_info[:2]<(3,14) else 1)' 2>/dev/null; then
-      printf '%s' "$p"; return
-    fi
+    want_314 "$p" || continue
+    printf '%s' "$p"; return
   done
   printf none
 }
 PYBIN="$(pick_python)"
-[ "$PYBIN" != none ] || die "no Python 3.11-3.13 found. Try: pkg install tur-repo && pkg install python3.13"
+[ "$PYBIN" != none ] || die "no Python 3.14 found. Try: pkg install python (Termux main ships 3.14.x)"
 PYMINOR="cp$("$PYBIN" -c 'import sys;print(f"{sys.version_info.major}{sys.version_info.minor}")')"
 say "Python: $("$PYBIN" --version) ($PYMINOR)"
 
@@ -66,8 +67,8 @@ trap 'rm -rf "$TMP"' EXIT
 curl -fsSL -o "$TMP/$ASSET" \
   "https://github.com/$REPO/releases/download/$TAG/$ASSET" \
   || die "no $ASSET in $TAG — your Termux Python ($PYMINOR) has no prebuilt bundle;
-   install a matching one (e.g. 'pkg install tur-repo && pkg install python3.13') or run upstream:
-   curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash"
+    install python 3.14 from Termux main ('pkg install python'), or run upstream:
+    curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash"
 curl -fsSL -o "$TMP/$ASSET.sha256" \
   "https://github.com/$REPO/releases/download/$TAG/$ASSET.sha256" \
   && ( cd "$TMP" && sha256sum -c "$ASSET.sha256" ) \
