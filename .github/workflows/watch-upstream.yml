@@ -4,6 +4,13 @@ name: watch-upstream
 # we copy) into versions.json + a wheel-bundle release, or builds the
 # latest unseen `main` commit as a dev prerelease when no release bump is
 # pending.
+#
+# It also stops itself. If a build this workflow dispatched does not survive,
+# the next run parks a WATCH_PAUSED variable, opens one labelled issue, and
+# then exits clean on every following tick. Re-dispatching the same broken
+# build every 12h only produces a wall of red X's nobody reads; the failure
+# is already on record the first time. To start watching again, run this
+# workflow with force=true (which also closes the pause notice).
 
 on:
   schedule:
@@ -20,6 +27,10 @@ on:
         description: "Force bump to this upstream version (leave blank to auto-detect)."
         type: string
         default: ""
+      force:
+        description: "Ignore an active pause and watch again (also use to resume after fixing a failed build)."
+        type: boolean
+        default: false
       skip_dev:
         description: "Skip the dev-branch prerelease build this run."
         type: boolean
@@ -43,13 +54,88 @@ jobs:
     permissions:
       contents: write
       actions: write
+      issues: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      # A build we dispatched that did not survive means something in the
+      # chain is broken — and the watcher's own contribution to that is to
+      # re-dispatch the same thing every 12h, each run another red X in the
+      # feed. So: one failure, then stop watching. This step exits 0 while
+      # paused, deliberately: a schedule that keeps failing is a schedule
+      # nobody reads.
+      - name: Circuit breaker — did our last dispatched build survive?
+        id: breaker
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          set -eu
+          getv() { gh variable get "$1" --repo "$OURS" 2>/dev/null || true; }
+
+          if [ "$FORCE" = "true" ]; then
+            gh variable delete WATCH_PAUSED         --repo "$OURS" >/dev/null 2>&1 || true
+            gh variable delete WATCH_LAST_RUN_ID    --repo "$OURS" >/dev/null 2>&1 || true
+            echo "forced: breaker cleared, watching again."
+            exit 0
+          fi
+
+          if [ "$(getv WATCH_PAUSED)" = "true" ]; then
+            echo "paused=true" >> "$GITHUB_OUTPUT"
+            echo "watching is PAUSED — a build we dispatched failed."
+            echo "fix the build, then re-run this workflow with force=true to resume."
+            exit 0
+          fi
+
+          LAST="$(getv WATCH_LAST_RUN_ID)"
+          if [ -z "$LAST" ]; then
+            echo "no dispatched build on record — watching."
+            exit 0
+          fi
+
+          VERDICT="$(gh run view "$LAST" --repo "$OURS" \
+            --json status,conclusion,htmlUrl \
+            --jq '[.status,.conclusion,.htmlUrl] | @tsv' 2>/dev/null || true)"
+          [ -n "$VERDICT" ] || { echo "could not read run $LAST — watching."; exit 0; }
+          IFS="$(printf '\t')" read -r STATUS CONCLUSION URL <<< "$VERDICT"
+
+          if [ "$STATUS" != "completed" ]; then
+            echo "dispatched build $LAST is still $STATUS — watching."
+            exit 0
+          fi
+          if [ "$CONCLUSION" = "success" ]; then
+            gh variable delete WATCH_LAST_RUN_ID --repo "$OURS" >/dev/null 2>&1 || true
+            echo "last dispatched build succeeded — watching."
+            exit 0
+          fi
+
+          # Only reached on a real failure. Park the breaker and say so once
+          # (an open issue already covering it suppresses a new one), so the
+          # stop is visible without being a notification stream.
+          gh label create watch-paused --repo "$OURS" --force \
+            --description "watch-upstream stopped after a dispatched build failed" >/dev/null
+          gh variable set WATCH_PAUSED --repo "$OURS" --body "true"
+          echo "paused=true" >> "$GITHUB_OUTPUT"
+          echo "::warning title=watch-upstream paused::dispatched build $LAST ended $CONCLUSION — $URL"
+          OPEN="$(gh issue list --repo "$OURS" --state open --label watch-paused \
+                  --json number --jq 'length' 2>/dev/null || echo 0)"
+          if [ "$OPEN" = "0" ]; then
+            gh issue create --repo "$OURS" \
+              --title "watch-upstream paused: build $LAST ended $CONCLUSION" \
+              --label watch-paused \
+              --body "The wheel build dispatched by [watch-upstream run $GITHUB_RUN_ID] ended \`$CONCLUSION\`: $URL
+
+          Watching is paused so this does not recur on every scheduled tick. Fix the build, then re-run \`watch-upstream\` with \`force=true\` to resume."
+          fi
+
+      # Everything below is gated on these two entry points being `paused`
+      # explicitly, or on `steps.upstream.outputs.changed` / `steps.dev.outputs.build`
+      # being unset because their producing step did not run.
       - name: Sync stability of existing releases
+        if: steps.breaker.outputs.paused != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -121,9 +207,11 @@ jobs:
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Preflight — tag + constraints file exist upstream
-        # Catch upstream renames/removals before dispatching the build: the
-        # container clones the tag and resolves with -c constraints-termux.txt.
+      - name: Preflight — tag exists upstream
+        # Catch upstream renames/removals before dispatching the build. The
+        # tag is a hard requirement (the container clones it). Everything
+        # else upstream can move without it meaning anything about us — and
+        # a red X on this job every 12h is how the real signal gets lost.
         if: steps.upstream.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -131,8 +219,16 @@ jobs:
         run: |
           set -eu
           gh api "repos/$UPSTREAM/git/refs/tags/v$NEW" --jq .object.sha >/dev/null
-          gh api "repos/$UPSTREAM/contents/constraints-termux.txt?ref=v$NEW" --jq .sha >/dev/null
-          echo "preflight OK — tag v$NEW and constraints-termux.txt exist upstream"
+          echo "preflight OK — tag v$NEW exists upstream"
+
+          # constraints-termux.txt was deleted upstream when its exact pins
+          # moved into pyproject.toml, so its absence is normal, not a
+          # failure. Report it so a resolver surprise is still traceable.
+          if gh api "repos/$UPSTREAM/contents/constraints-termux.txt?ref=v$NEW" --jq .sha >/dev/null 2>&1; then
+            echo "constraints-termux.txt present at v$NEW — build will resolve with -c"
+          else
+            echo "note: no constraints-termux.txt at v$NEW — build resolves from pyproject.toml's exact pins"
+          fi
 
       - name: Bump versions.json
         if: steps.upstream.outputs.changed == 'true'
@@ -198,7 +294,7 @@ jobs:
 
       - name: Detect new upstream main commits
         id: dev
-        if: steps.upstream.outputs.changed != 'true' && inputs.skip_dev != true
+        if: steps.breaker.outputs.paused != 'true' && steps.upstream.outputs.changed != 'true' && inputs.skip_dev != true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -212,7 +308,17 @@ jobs:
           # package version AT THAT COMMIT plus the short sha.
           VERSION="$(gh api "repos/$UPSTREAM/contents/pyproject.toml?ref=$SHA" \
             --jq .content | base64 -d | sed -n 's/^version = "\([^"]*\)".*/\1/p' | head -1)"
-          [ -n "$VERSION" ] || { echo "error: could not read version from pyproject.toml@$SHORT" >&2; exit 1; }
+          # Upstream stopped stamping a real version into pyproject.toml (it
+          # is "0.0.0" now — the release tag is the version). Without this
+          # fallback every dev build would collide on tag v0.0.0-dev.<sha>
+          # and, worse, two different commits would publish the same version
+          # number in the release title.
+          if [ -z "$VERSION" ] || [ "$VERSION" = "0.0.0" ]; then
+            VERSION="$(gh release list --repo "$UPSTREAM" --exclude-drafts -L 20 \
+              --json tagName --jq '.[0].tagName // empty' | sed 's/^v//')"
+            echo "pyproject.toml@$SHORT has no real version — basing the dev tag on the newest upstream release ($VERSION)" >&2
+          fi
+          [ -n "$VERSION" ] || { echo "error: could not determine a version for $SHORT" >&2; exit 1; }
           TAG="v${VERSION}-dev.${SHORT}"
           echo "upstream $MAIN head: $SHA (upstream reports v$VERSION) → $TAG"
 
@@ -264,6 +370,34 @@ jobs:
             -f prerelease=true
           echo "dispatched dev build of $SHA → $TAG (prerelease)"
 
+      - name: Record the build we dispatched
+        # `gh workflow run` returns nothing, so find the run it created and
+        # remember it: the circuit breaker reads this id on the next tick and
+        # pauses if the build it produced did not survive.
+        if: (steps.upstream.outputs.changed == 'true' || steps.dev.outputs.build == 'true') && inputs.dry_run != true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          ID=""
+          for _ in $(seq 1 30); do
+            ID="$(gh run list --repo "$OURS" --workflow build.yml --branch main --limit 5 \
+              --json databaseId,status \
+              --jq '[.[] | select(.status != "completed")] | .[0].databaseId // empty' 2>/dev/null || true)"
+            [ -n "$ID" ] && break
+            sleep 2
+          done
+          [ -n "$ID" ] || {
+            # Do NOT fail here: the breaker simply has nothing to check next
+            # tick, and failing this job is exactly the red-X noise the
+            # breaker exists to avoid.
+            echo "::warning title=watch-upstream::build dispatched, but no run id could be found to track — the circuit breaker will not be able to judge this build"
+            exit 0
+          }
+          gh variable set WATCH_LAST_RUN_ID --repo "$OURS" --body "$ID"
+          gh variable delete WATCH_PAUSED --repo "$OURS" >/dev/null 2>&1 || true
+          echo "tracking build run $ID — the circuit breaker will check its verdict next tick."
+
       - name: Dev dry-run summary
         if: steps.dev.outputs.build == 'true' && inputs.dry_run == true
         env:
@@ -271,3 +405,17 @@ jobs:
           TAG: ${{ steps.dev.outputs.tag }}
         run: |
           echo "DRY RUN: would dispatch build.yml for main commit $SHA → $TAG (prerelease=true)."
+
+      - name: Resume — close the pause notice
+        # Only reached on a forced run. Clearing the breaker without closing
+        # the issue it raised leaves a stale "paused" notice lying around.
+        if: inputs.force == true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          for n in $(gh issue list --repo "$OURS" --state open --label watch-paused \
+                     --json number --jq '.[].number'); do
+            gh issue close "$n" --repo "$OURS" \
+              --comment "Resumed by a forced watch-upstream run ($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)."
+          done
