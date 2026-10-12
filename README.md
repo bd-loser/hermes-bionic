@@ -29,11 +29,46 @@ and the install target.
   publishes `hermes-wheels-<ver>-<pytag>.tar.gz` on a GitHub release.
 - `watch-upstream.yml` mirrors new upstream releases into `versions.json`
   and dispatches a build — unless the last build it dispatched did not
-  survive, in which case it parks a `WATCH_PAUSED` variable and stops
-  watching until the workflow is re-run with `force=true`.
+  survive, in which case run history blocks further automatic builds.
+  A successful manual build resumes watching; `force=true` allows one
+  watcher run past a failed build. Running builds always block dispatch.
 - `install.sh` fetches the matching bundle, verifies the sha256, creates
   `~/.hermes/venv`, and installs `hermes-agent[termux]` with
   `--find-links <bundle>` so resolution never touches a compiler.
 
 Fork-style companion to [opencode-bionic](https://github.com/bd-loser/opencode-bionic);
 same toolchain philosophy, wheels instead of ELF.
+
+## Browser integration (issue #1 — pending native CI validation)
+
+Termux Chromium has been tested headless on-device. The npm `agent-browser`
+installer does not ship an Android binary, so installing its Linux binary
+does not solve the Bionic compatibility problem.
+
+The manual **agent-browser-termux** workflow builds pinned agent-browser
+0.38.1 inside termux-docker, using its Android Rust toolchain. It uploads an
+artifact rather than publishing an untested release. No phone-side compiler
+installation or package upgrade is required.
+
+After that workflow succeeds, download and extract its artifact, then:
+
+```bash
+# Only needed if Chromium is not already installed:
+pkg install x11-repo
+pkg install chromium
+
+# From this repository checkout:
+bash browser/install.sh /path/to/extracted-artifact
+export AGENT_BROWSER_EXECUTABLE_PATH="$PREFIX/bin/chromium-browser"
+bash browser/smoke-test.sh
+```
+
+Add `AGENT_BROWSER_EXECUTABLE_PATH` with its expanded absolute path to
+`~/.hermes/.env` so Hermes' browser readiness check finds Chromium too.
+The wrapper selects Termux Chromium, supplies Android launch flags, and
+avoids downloading glibc Chromium. `--no-sandbox` disables Chromium's own
+sandbox; this configuration is intended for the non-root Termux environment.
+
+The native build and full Hermes browser-tool test must pass before issue #1
+can be considered resolved. The Chromium-only smoke test is not proof that
+agent-browser or Hermes integration works.

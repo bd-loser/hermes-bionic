@@ -294,7 +294,7 @@ wheel_half() {
   # $1 = half file, $2 = cache dir, $3 = tag printed before every line.
   # Streams LIVE with a tag prefix: backgrounded halves that only print
   # at the end look like a hung job in the Actions log.
-  PIP_CACHE_DIR="$2" "$PYBIN" -u -m pip wheel -r "$1" \
+  PIP_CACHE_DIR="$2" "$PYBIN" -u -m pip wheel --no-deps -r "$1" \
     "${CONSTRAINTS[@]}" \
     -f "$TMPDIR/psutil-wheel" \
     ${UVLOOP_PIN:+-f "$TMPDIR/uvloop-wheel"} \
@@ -314,17 +314,13 @@ echo "→ both halves done"
 cp "$TMPDIR"/psutil-wheel/*.whl "$WHEELS"/
 [ -n "$UVLOOP_PIN" ] && cp "$TMPDIR"/uvloop-wheel/*.whl "$WHEELS"/
 
-# hard check: every resolved dep must have a wheel in the bundle.
-missing=0
-while IFS= read -r req; do
-  [ -n "$req" ] || continue
-  norm="$(printf '%s' "${req%%==*}" | tr '[:upper:]' '[:lower:]' | tr -s '._-' '_')"
-  if ! ls "$WHEELS" | grep -qi "^${norm}-"; then
-    echo "MISSING wheel for $req" >&2
-    missing=1
-  fi
-done < "$TMPDIR/deps.txt"
-[ "$missing" = 0 ] || { echo "error: bundle incomplete" >&2; exit 1; }
+# Check normalized distribution names, exact versions, and interpreter tags.
+"$PYBIN" /workspace/ci/check-wheelhouse.py "$TMPDIR/deps.txt" "$WHEELS"
+# Prove the frozen graph installs offline in a fresh environment before release.
+"$PYBIN" -m venv "$TMPDIR/verify-venv"
+"$TMPDIR/verify-venv/bin/python" -m pip install --no-index \
+  --find-links "$WHEELS" -r "$TMPDIR/deps.txt"
+"$TMPDIR/verify-venv/bin/python" -m pip check
 echo "→ bundle complete: $(ls "$WHEELS"/*.whl | wc -l) wheels"
 
 cp "$TMPDIR/deps.txt" "$WHEELS/pins.txt"

@@ -4,3 +4,5 @@
 # - out-host.txt is the streamed docker log from build.yml's tee step.
 ci-cache/
 out-host.txt
+__pycache__/
+browser-out/

@@ -1,0 +1,22 @@
+name: agent-browser-termux
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Bionic binary
+        run: |
+          mkdir -p browser-out
+          chmod 777 browser-out
+          docker run --rm -v "$PWD:/workspace:ro" -v "$PWD/browser-out:/out" \
+            termux/termux-docker:aarch64 bash /workspace/ci/build-agent-browser.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agent-browser-0.38.1-android-arm64
+          path: browser-out/agent-browser-android-arm64*
+          if-no-files-found: error

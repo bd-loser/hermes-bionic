@@ -1,0 +1,16 @@
+#!/data/data/com.termux/files/usr/bin/bash
+set -euo pipefail
+PREFIX="${PREFIX:-/data/data/com.termux/files/usr}"
+export TMPDIR="${TMPDIR:-$PREFIX/tmp}"
+export AGENT_BROWSER_EXECUTABLE_PATH="${AGENT_BROWSER_EXECUTABLE_PATH:-$PREFIX/bin/chromium-browser}"
+if [ "${1:-}" = install ]; then
+  [ -x "$AGENT_BROWSER_EXECUTABLE_PATH" ] || {
+    echo 'Install Termux Chromium: pkg install x11-repo && pkg install chromium' >&2
+    exit 1
+  }
+  "$AGENT_BROWSER_EXECUTABLE_PATH" --version
+  exit
+fi
+# Launch the Termux package instead of downloading a Linux/glibc browser.
+export AGENT_BROWSER_ARGS="${AGENT_BROWSER_ARGS:+$AGENT_BROWSER_ARGS,}--no-sandbox,--disable-dev-shm-usage"
+exec "$PREFIX/libexec/hermes-bionic/agent-browser" "$@"
