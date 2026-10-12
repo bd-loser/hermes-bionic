@@ -1,0 +1,17 @@
+diff --git a/cli/src/native/cdp/chrome.rs b/cli/src/native/cdp/chrome.rs
+--- a/cli/src/native/cdp/chrome.rs
++++ b/cli/src/native/cdp/chrome.rs
+@@ -1661,6 +1661,13 @@
+ 
+ /// Search Playwright's browser cache for a Chromium binary.
+ /// Legacy fallback for users who previously installed Chromium via Playwright.
++#[cfg(target_os = "android")]
++fn find_playwright_chromium() -> Option<PathBuf> {
++    // Playwright downloads desktop binaries, not Bionic/Android builds.
++    // Termux supplies Chromium through the explicit executable-path option.
++    None
++}
++#[cfg(not(target_os = "android"))]
+ fn find_playwright_chromium() -> Option<PathBuf> {
+     let mut search_dirs = Vec::new();
+ 
