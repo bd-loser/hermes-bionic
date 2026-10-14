@@ -213,6 +213,40 @@ else
 fi
 pip wheel --no-deps "$PSUTIL_DIR" -w "$TMPDIR/psutil-wheel"
 
+# primp (DuckDuckGo search, via `ddgs`) enables hickory-dns by default. That
+# pulls hickory-resolver -> ndk-context, which panics on every request in a
+# Termux process ("android context was not initialized"). Build primp-python
+# from the pinned sdist with hickory-dns disabled, so it uses the system
+# resolver. The source is hash-pinned; the patch must apply or the build dies.
+PRIMP_VER=2.0.1
+PRIMP_SHA256=82ba17b077bef19a189d9ec8d77ca632496cb444e0f4fa37e27e90041cf0da8f
+PRIMP_DIR="$TMPDIR/primp-src"
+rm -rf "$PRIMP_DIR" && mkdir -p "$PRIMP_DIR"
+curl -fsSL -o "$PRIMP_DIR/primp.tar.gz" \
+  "https://files.pythonhosted.org/packages/source/p/primp/primp-$PRIMP_VER.tar.gz"
+echo "$PRIMP_SHA256  $PRIMP_DIR/primp.tar.gz" | sha256sum -c -
+tar -xzf "$PRIMP_DIR/primp.tar.gz" -C "$PRIMP_DIR" --strip-components=0
+PRIMP_SRC="$PRIMP_DIR/primp-$PRIMP_VER"
+PRIMP_TOML="$PRIMP_SRC/crates/primp-python/Cargo.toml"
+# Exact-string swap: fail if the upstream manifest changed shape.
+"$PYBIN" - "$PRIMP_TOML" <<'EOF'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+old = 'primp = { version = "2.0", path = "../primp", features = [\n    "hickory-dns",\n] }'
+# Keep every upstream default feature EXCEPT hickory-dns (primp's default set
+# is: cookies gzip brotli zstd deflate query form json multipart stream
+# system-proxy charset). Dropping them would silently break DDGS requests.
+new = ('primp = { version = "2.0", path = "../primp", default-features = false, features = [\n'
+       '    "cookies", "gzip", "brotli", "zstd", "deflate", "query", "form", "json",\n'
+       '    "multipart", "stream", "system-proxy", "charset",\n'
+       '] }')
+assert s.count(old) == 1, "primp-python Cargo.toml changed; re-check the hickory-dns swap"
+open(p, "w").write(s.replace(old, new))
+print("patched primp-python: hickory-dns disabled")
+EOF
+pip wheel --no-deps "$PRIMP_SRC" -w "$TMPDIR/primp-wheel"
+
 # upstream deleted constraints-termux.txt when every direct dep moved into
 # pyproject.toml behind exact == pins; an unconditional -c then dies with
 # "Could not open requirements file". Keep honouring it where upstream still
@@ -294,7 +328,12 @@ else
   CACHE_A="$TMPDIR/pipecache-a"
   CACHE_B="$TMPDIR/pipecache-b"
 fi
-split -n l/2 -d "$TMPDIR/deps.txt" "$TMPDIR/half-"
+# primp is built separately above (patched, no hickory-dns). Drop it from the
+# halves so pip does not rebuild the unpatched sdist; the patched wheel is
+# copied into the bundle afterwards, and pins.txt keeps primp==2.0.1.
+grep -v '^primp==' "$TMPDIR/deps.txt" > "$TMPDIR/deps-nopraw.txt"
+mv "$TMPDIR/deps-nopraw.txt" "$TMPDIR/deps-build.txt"
+split -n l/2 -d "$TMPDIR/deps-build.txt" "$TMPDIR/half-"
 wheel_half() {
   # $1 = half file, $2 = cache dir, $3 = tag printed before every line.
   # Streams LIVE with a tag prefix: backgrounded halves that only print
@@ -317,6 +356,8 @@ echo "→ both halves done"
 
 # the patched wheels are inputs, not outputs — copy them into the bundle.
 cp "$TMPDIR"/psutil-wheel/*.whl "$WHEELS"/
+# patched primp (hickory-dns off) — same name/version as pins.txt.
+cp "$TMPDIR"/primp-wheel/primp-*.whl "$WHEELS"/
 [ -n "$UVLOOP_PIN" ] && cp "$TMPDIR"/uvloop-wheel/*.whl "$WHEELS"/
 
 # Check normalized distribution names, exact versions, and interpreter tags.
