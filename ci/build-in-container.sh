@@ -213,11 +213,9 @@ else
 fi
 pip wheel --no-deps "$PSUTIL_DIR" -w "$TMPDIR/psutil-wheel"
 
-# primp (DuckDuckGo search, via `ddgs`) enables hickory-dns by default. That
-# pulls hickory-resolver -> ndk-context, which panics on every request in a
-# Termux process ("android context was not initialized"). Build primp-python
-# from the pinned sdist with hickory-dns disabled, so it uses the system
-# resolver. The source is hash-pinned; the patch must apply or the build dies.
+# primp (DuckDuckGo search, via `ddgs`): hickory system-config panics on
+# Termux (ndk-context). Build the pinned sdist with ci/patch-primp.py applied
+# (Google DNS, documented trade-off). Source is hash-pinned.
 PRIMP_VER=2.0.1
 PRIMP_SHA256=82ba17b077bef19a189d9ec8d77ca632496cb444e0f4fa37e27e90041cf0da8f
 PRIMP_DIR="$TMPDIR/primp-src"
@@ -225,26 +223,9 @@ rm -rf "$PRIMP_DIR" && mkdir -p "$PRIMP_DIR"
 curl -fsSL -o "$PRIMP_DIR/primp.tar.gz" \
   "https://files.pythonhosted.org/packages/source/p/primp/primp-$PRIMP_VER.tar.gz"
 echo "$PRIMP_SHA256  $PRIMP_DIR/primp.tar.gz" | sha256sum -c -
-tar -xzf "$PRIMP_DIR/primp.tar.gz" -C "$PRIMP_DIR" --strip-components=0
+tar -xzf "$PRIMP_DIR/primp.tar.gz" -C "$PRIMP_DIR"
 PRIMP_SRC="$PRIMP_DIR/primp-$PRIMP_VER"
-PRIMP_TOML="$PRIMP_SRC/crates/primp-python/Cargo.toml"
-# Exact-string swap: fail if the upstream manifest changed shape.
-"$PYBIN" - "$PRIMP_TOML" <<'EOF'
-import sys
-p = sys.argv[1]
-s = open(p).read()
-old = 'primp = { version = "2.0", path = "../primp", features = [\n    "hickory-dns",\n] }'
-# Keep every upstream default feature EXCEPT hickory-dns (primp's default set
-# is: cookies gzip brotli zstd deflate query form json multipart stream
-# system-proxy charset). Dropping them would silently break DDGS requests.
-new = ('primp = { version = "2.0", path = "../primp", default-features = false, features = [\n'
-       '    "cookies", "gzip", "brotli", "zstd", "deflate", "query", "form", "json",\n'
-       '    "multipart", "stream", "system-proxy", "charset",\n'
-       '] }')
-assert s.count(old) == 1, "primp-python Cargo.toml changed; re-check the hickory-dns swap"
-open(p, "w").write(s.replace(old, new))
-print("patched primp-python: hickory-dns disabled")
-EOF
+"$PYBIN" /workspace/ci/patch-primp.py "$PRIMP_SRC"
 pip wheel --no-deps "$PRIMP_SRC" -w "$TMPDIR/primp-wheel"
 
 # upstream deleted constraints-termux.txt when every direct dep moved into
