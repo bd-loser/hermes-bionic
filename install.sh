@@ -54,10 +54,27 @@ PYBIN="$(pick_python)"
 PYMINOR="cp$("$PYBIN" -c 'import sys;print(f"{sys.version_info.major}{sys.version_info.minor}")')"
 say "Python: $("$PYBIN" --version) ($PYMINOR)"
 
-say "Resolving latest $REPO release..."
-TAG="$(curl -fsSL "$API/releases/latest" 2>/dev/null \
+# /releases/latest skips prereleases and only returns the newest *stable* release,
+# which may not carry a bundle for this Python. Walk recent releases (newest
+# first, GitHub's order), preferring stable tags, and take the first one that
+# actually has a bundle for $PYMINOR. Prereleases are the fallback.
+say "Resolving newest $REPO release with a $PYMINOR bundle..."
+RELEASES="$(curl -fsSL "$API/releases?per_page=30" 2>/dev/null \
   | grep -oE '"tag_name":\s*"[^"]+"' | sed -E 's/.*"([^"]+)"/\1/' || true)"
-[ -n "$TAG" ] || die "could not resolve latest release (network?)"
+[ -n "$RELEASES" ] || die "could not list releases (network?)"
+TAG=""
+for pass in stable any; do
+  while read -r cand; do
+    [ -n "$cand" ] || continue
+    if [ "$pass" = stable ] && [[ "$cand" == *-dev* ]]; then continue; fi
+    cv="${cand#v}"
+    if curl -fsIL -o /dev/null "https://github.com/$REPO/releases/download/$cand/hermes-wheels-${cv}-${PYMINOR}.tar.gz" 2>/dev/null; then
+      TAG="$cand"; break 2
+    fi
+  done <<< "$RELEASES"
+done
+[ -n "$TAG" ] || die "no release has a $PYMINOR bundle (checked: $(echo $RELEASES | tr '\n' ' ')). Try again later, or use upstream: curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash"
+say "Selected $TAG"
 VER="${TAG#v}"
 ASSET="hermes-wheels-${VER}-${PYMINOR}.tar.gz"
 
