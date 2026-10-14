@@ -42,8 +42,10 @@ apt update -y
 # its sdist build fails cryptically without (its setup.py prints the real
 # cause above "Failed building wheel for Pillow").
 # libheif: pillow-heif links it; the sdist build needs the headers + .pc.
+# libxml2/libxslt: `ddgs` -> lxml has no Android wheel; its sdist build needs
+# the headers + .pc files (the lxml build error asks for exactly these).
 apt install -y git python clang rust make pkg-config libffi openssl ca-certificates curl patch jq \
-  libjpeg-turbo zlib libpng freetype libwebp libheif
+  libjpeg-turbo zlib libpng freetype libwebp libheif libxml2 libxslt
 
 BUILD_ROOT="$HOME/hermes-build"
 rm -rf "$BUILD_ROOT"
