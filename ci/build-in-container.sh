@@ -228,8 +228,11 @@ fi
 # deliberately omits it (libuv's ./configure cannot run on Android) and
 # upstream gates the extra behind `sys_platform != 'android'`, so whether it
 # appears depends on the marker environment, not on our wishes.
+# `ddgs` is a separate upstream extra (DuckDuckGo search backend, pulls primp,
+# a Rust package with no Termux wheel). It is not in [termux], so it must be
+# requested explicitly or the bundle cannot satisfy DuckDuckGo search offline.
 "$PYBIN" -m pip install --dry-run --report "$TMPDIR/report.json" \
-  "$BUILD_ROOT[termux]" \
+  "$BUILD_ROOT[termux,ddgs]" \
   "${CONSTRAINTS[@]}" \
   -f "$TMPDIR/psutil-wheel"
 "$PYBIN" - "$TMPDIR/report.json" "$TMPDIR/deps.txt" <<'EOF'
