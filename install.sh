@@ -18,6 +18,32 @@ say() { printf '\033[36m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[33m!!\033[0m %s\n' "$*" >&2; }
 die() { printf '\033[31mxx\033[0m %s\n' "$*" >&2; exit 1; }
 
+# Every step's full output goes to a log so a failure can be diagnosed.
+LOG_DIR="$HOME/.hermes/install-logs"
+mkdir -p "$LOG_DIR"
+LOG="$LOG_DIR/install-$(date +%Y%m%d-%H%M%S).log"
+echo "install log: $LOG"
+
+# run_step "description" command args...
+# Prints one line before and after, keeps the full output in $LOG, and on
+# failure shows the last lines of that step's output instead of hiding it.
+run_step() {
+  local desc="$1"; shift
+  say "$desc ..."
+  local out; out="$(mktemp)"
+  if "$@" >"$out" 2>&1; then
+    cat "$out" >>"$LOG"; rm -f "$out"
+    say "$desc: ok"
+  else
+    local rc=$?
+    cat "$out" >>"$LOG"
+    printf '\033[31mxx\033[0m %s failed (exit %s). Last output:\n' "$desc" "$rc" >&2
+    tail -n 20 "$out" >&2
+    rm -f "$out"
+    die "$desc failed. Full log: $LOG"
+  fi
+}
+
 [ -n "${PREFIX:-}" ] && [[ "$PREFIX" == *com.termux* ]] \
   || die "run this inside Termux (PREFIX not set)"
 
@@ -25,9 +51,8 @@ say "Installing Termux prerequisites..."
 # openssl/libffi/libjpeg-turbo/libpng/zlib/freetype/libwebp/libheif are
 # runtime .so deps of the bundled wheels (cryptography, Pillow,
 # pillow-heif) — wheels link against the Termux system libs.
-pkg install -y python curl ca-certificates git ripgrep \
-  openssl libffi libjpeg-turbo libpng zlib freetype libwebp libheif >/dev/null 2>&1 \
-  || die "pkg install failed"
+run_step "Installing Termux packages" pkg install -y python curl ca-certificates git ripgrep \
+  openssl libffi libjpeg-turbo libpng zlib freetype libwebp libheif
 
 # hermes pins every dependency as `==X.Y.Z; python_version >= '3.14'`.
 # Below 3.14 those markers do not apply, so the bundle must be — and be
@@ -40,9 +65,9 @@ want_314() {
 pick_python() {
   local p
   if want_314 python; then printf python; return; fi
-  pkg install -y tur-repo >/dev/null 2>&1 || true
+  pkg install -y tur-repo >>"$LOG" 2>&1 || true
   for p in python3.14 python3.15; do
-    pkg install -y "$p" >/dev/null 2>&1 || continue
+    pkg install -y "$p" >>"$LOG" 2>&1 || continue
     command -v "$p" >/dev/null || continue
     want_314 "$p" || continue
     printf '%s' "$p"; return
@@ -124,15 +149,25 @@ SITE="$VENV/lib/python$("$PYBIN" -c 'import sys;print(f"{sys.version_info.major}
   --find-links "$HERMES_HOME/wheels/$PYMINOR" \
   -r "$HERMES_HOME/wheels/$PYMINOR/pins.txt" 2>"$PIP_LOG" &
 PIP_PID=$!
+# Progress: a live line on a terminal; under `curl | bash` (no TTY) a plain
+# status line every 15 s, so the wait never looks like a hang.
+TICK=0
 while kill -0 "$PIP_PID" 2>/dev/null; do
   sleep 3
+  TICK=$((TICK + 3))
+  n="$(find "$SITE" -maxdepth 1 -name '*.dist-info' -type d 2>/dev/null | wc -l)"
   if [[ -t 1 ]]; then
-    n="$(find "$SITE" -maxdepth 1 -name '*.dist-info' -type d 2>/dev/null | wc -l)"
-    printf '\r\033[2K\033[36m==>\033[0m installed %s/%s wheels...' "$n" "$TOTAL_DEPS"
+    printf '\r\033[2K\033[36m==>\033[0m installed %s/%s packages...' "$n" "$TOTAL_DEPS"
+  elif (( TICK % 15 == 0 )); then
+    say "installed $n/$TOTAL_DEPS packages..."
   fi
 done
-wait "$PIP_PID" || { echo; tail -15 "$PIP_LOG" >&2; die "pip dependency install failed (full log: $PIP_LOG)"; }
 [[ -t 1 ]] && printf '\r\033[2K' || true
+if ! wait "$PIP_PID"; then
+  tail -15 "$PIP_LOG" >&2
+  die "pip dependency install failed (full log: $PIP_LOG)"
+fi
+say "installed $TOTAL_DEPS/$TOTAL_DEPS packages: ok"
 
 say "Installing hermes-agent itself (editable, from upstream git)..."
 # hermes-agent's setup.py refuses bdist_wheel/sdist outside Nix, so it is
@@ -150,7 +185,7 @@ else
   # shallow clones of a big repo flake on mobile networks (SSL EOF mid
   # fetch-pack) — retry instead of dying on the first attempt.
   for i in 1 2 3 4 5; do
-    if git clone --quiet --depth 1 --branch "v$VER" \
+    if git clone --depth 1 --branch "v$VER" \
       https://github.com/NousResearch/hermes-agent.git "$SRC"; then
       break
     fi
