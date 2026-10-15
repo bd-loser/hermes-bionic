@@ -213,6 +213,21 @@ else
 fi
 pip wheel --no-deps "$PSUTIL_DIR" -w "$TMPDIR/psutil-wheel"
 
+# primp (DuckDuckGo search, via `ddgs`): hickory system-config panics on
+# Termux (ndk-context). Build the pinned sdist with ci/patch-primp.py applied
+# (Google DNS, documented trade-off). Source is hash-pinned.
+PRIMP_VER=2.0.1
+PRIMP_SHA256=82ba17b077bef19a189d9ec8d77ca632496cb444e0f4fa37e27e90041cf0da8f
+PRIMP_DIR="$TMPDIR/primp-src"
+rm -rf "$PRIMP_DIR" && mkdir -p "$PRIMP_DIR"
+curl -fsSL -o "$PRIMP_DIR/primp.tar.gz" \
+  "https://files.pythonhosted.org/packages/source/p/primp/primp-$PRIMP_VER.tar.gz"
+echo "$PRIMP_SHA256  $PRIMP_DIR/primp.tar.gz" | sha256sum -c -
+tar -xzf "$PRIMP_DIR/primp.tar.gz" -C "$PRIMP_DIR"
+PRIMP_SRC="$PRIMP_DIR/primp-$PRIMP_VER"
+"$PYBIN" /workspace/ci/patch-primp.py "$PRIMP_SRC"
+pip wheel --no-deps "$PRIMP_SRC" -w "$TMPDIR/primp-wheel"
+
 # upstream deleted constraints-termux.txt when every direct dep moved into
 # pyproject.toml behind exact == pins; an unconditional -c then dies with
 # "Could not open requirements file". Keep honouring it where upstream still
@@ -294,7 +309,12 @@ else
   CACHE_A="$TMPDIR/pipecache-a"
   CACHE_B="$TMPDIR/pipecache-b"
 fi
-split -n l/2 -d "$TMPDIR/deps.txt" "$TMPDIR/half-"
+# primp is built separately above (patched, no hickory-dns). Drop it from the
+# halves so pip does not rebuild the unpatched sdist; the patched wheel is
+# copied into the bundle afterwards, and pins.txt keeps primp==2.0.1.
+grep -v '^primp==' "$TMPDIR/deps.txt" > "$TMPDIR/deps-nopraw.txt"
+mv "$TMPDIR/deps-nopraw.txt" "$TMPDIR/deps-build.txt"
+split -n l/2 -d "$TMPDIR/deps-build.txt" "$TMPDIR/half-"
 wheel_half() {
   # $1 = half file, $2 = cache dir, $3 = tag printed before every line.
   # Streams LIVE with a tag prefix: backgrounded halves that only print
@@ -317,6 +337,8 @@ echo "→ both halves done"
 
 # the patched wheels are inputs, not outputs — copy them into the bundle.
 cp "$TMPDIR"/psutil-wheel/*.whl "$WHEELS"/
+# patched primp (hickory-dns off) — same name/version as pins.txt.
+cp "$TMPDIR"/primp-wheel/primp-*.whl "$WHEELS"/
 [ -n "$UVLOOP_PIN" ] && cp "$TMPDIR"/uvloop-wheel/*.whl "$WHEELS"/
 
 # Check normalized distribution names, exact versions, and interpreter tags.

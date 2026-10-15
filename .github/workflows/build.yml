@@ -19,6 +19,10 @@ on:
         description: "Create the release as a draft"
         type: boolean
         default: false
+      experimental:
+        description: "Publish to an isolated -exp tag only (never the stable tag)"
+        type: boolean
+        default: false
 
 concurrency:
   # Serializes publishes: two builds resolving the same tag would race on
@@ -83,10 +87,16 @@ jobs:
           VERSION: ${{ steps.v.outputs.version }}
           PRERELEASE: ${{ inputs.prerelease }}
           DRAFT: ${{ inputs.draft }}
+          EXPERIMENTAL: ${{ inputs.experimental }}
         run: |
           set -eu
           OUT_HOST="$GITHUB_WORKSPACE/../out"
           TAG="v$VERSION"
+          # Experiments must never touch the tag users install from.
+          if [ "${EXPERIMENTAL:-false}" = "true" ]; then
+            TAG="v$VERSION-exp.${GITHUB_RUN_ID}"
+            PRERELEASE=true
+          fi
           FLAGS=""
           [ "$PRERELEASE" = "true" ] && FLAGS="$FLAGS --prerelease"
           [ "$DRAFT" = "true" ] && FLAGS="$FLAGS --draft"
