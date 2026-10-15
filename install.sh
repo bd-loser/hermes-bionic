@@ -66,6 +66,8 @@ TAG=""
 for pass in stable any; do
   while read -r cand; do
     [ -n "$cand" ] || continue
+    # never install experiment/prerelease-only builds, even on the fallback pass
+    if [[ "$cand" == *-exp.* ]]; then continue; fi
     if [ "$pass" = stable ] && [[ "$cand" == *-dev* ]]; then continue; fi
     cv="${cand#v}"
     if curl -fsIL -o /dev/null "https://github.com/$REPO/releases/download/$cand/hermes-wheels-${cv}-${PYMINOR}.tar.gz" 2>/dev/null; then
@@ -86,10 +88,14 @@ curl -fsSL -o "$TMP/$ASSET" \
   || die "no $ASSET in $TAG — your Termux Python ($PYMINOR) has no prebuilt bundle;
     install python 3.14 from Termux main ('pkg install python'), or run upstream:
     curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash"
+# The bundle is installed with pip --no-index into a long-lived venv, so an
+# unverified archive is a supply-chain risk. Fail closed: no checksum, no install.
 curl -fsSL -o "$TMP/$ASSET.sha256" \
   "https://github.com/$REPO/releases/download/$TAG/$ASSET.sha256" \
-  && ( cd "$TMP" && sha256sum -c "$ASSET.sha256" ) \
-  || warn "checksum unavailable/skipped"
+  || die "could not download checksum for $ASSET (refusing to install unverified bundle)"
+( cd "$TMP" && sha256sum -c "$ASSET.sha256" >/dev/null ) \
+  || die "checksum MISMATCH for $ASSET (refusing to install)"
+say "Checksum verified."
 
 say "Unpacking wheels into $HERMES_HOME..."
 mkdir -p "$HERMES_HOME"
@@ -162,6 +168,8 @@ ln -sf "$VENV/bin/hermes" "$PREFIX/bin/hermes"
 ln -sf "$VENV/bin/hermes-agent" "$PREFIX/bin/hermes-agent" 2>/dev/null || true
 ln -sf "$VENV/bin/hermes-acp" "$PREFIX/bin/hermes-acp" 2>/dev/null || true
 
-say "Done: $(hermes --version 2>/dev/null || echo 'hermes installed — run: hermes')"
+"$VENV/bin/hermes" --version >/dev/null 2>&1 \
+  || die "hermes installed but does not start: run '$VENV/bin/hermes --version' for details"
+say "Done: $("$VENV/bin/hermes" --version 2>/dev/null | head -1)"
 echo
 echo "Next: configure a provider key, e.g.  export OPENROUTER_API_KEY=***  then run 'hermes'."
