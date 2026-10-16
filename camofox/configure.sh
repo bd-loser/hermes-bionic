@@ -109,6 +109,24 @@ step "fetch Firefox $VERSION source + apply patches"
 }
 cd "$WORK/camoufox/browser/$SRC_DIR"
 
+step "versioned-triple clang wrapper (termux toolchain emulation)"
+# termux-packages compiles through versioned-triple wrappers
+# ($TERMUX_HOST_PLATFORM-clang = aarch64-linux-android24). Bare "clang" calls
+# from cargo/pip/mach would otherwise fail in cdefs ("Unversioned target
+# triples are not supported"). Export the wrapped compiler on PATH so every
+# consumer (cc-crate, pip sdists, mach) gets the versioned triple.
+CWRAP="$HOME/clangwrap"
+mkdir -p "$CWRAP"
+for tool in clang clang++; do
+  cat > "$CWRAP/$tool" <<WEOF
+#!/data/data/com.termux/files/usr/bin/bash
+exec "$PREFIX_DIR/bin/$tool" --target=aarch64-unknown-linux-android24 "--sysroot=$PREFIX_DIR" "$@"
+WEOF
+  chmod 0755 "$CWRAP/$tool"
+done
+export PATH="$CWRAP:$PATH"
+echo 'int main(){}' | clang -xc - -o /dev/null && echo "clang wrapper selftest ok"
+
 step "build env (mirrors termux build.sh pre_configure)"
 TERMUX_HOST_PLATFORM=aarch64-linux-android
 CARGO_TARGET_NAME=aarch64-linux-android
