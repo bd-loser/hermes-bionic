@@ -1,0 +1,21 @@
+--- a/third_party/rust/cc/src/lib.rs
++++ b/third_party/rust/cc/src/lib.rs
+@@ -3806,14 +3806,13 @@
+ 
+     /// Get values from CFLAGS-style environment variable.
+     fn envflags(&self, env: &str) -> Result<Option<Vec<String>>, Error> {
+-        // Collect from all environment variables, in reverse order as in
+-        // `getenv_with_target_prefixes` precedence (so that `CFLAGS_$TARGET`
+-        // can override flags in `TARGET_CFLAGS`, which overrides those in
+-        // `CFLAGS`).
+         let mut any_set = false;
+         let mut res = vec![];
+-        for env in self.target_envs(env)?.iter().rev() {
++        for env in self.target_envs(env)?.iter() {
+             if let Some(var) = self.getenv(env) {
++                if any_set {
++                    continue;
++                }
+                 any_set = true;
+ 
+                 let var = var.to_string_lossy();

@@ -1,0 +1,39 @@
+name: camofox-configure
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  configure:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Camoufox-on-Termux configure (phase 2a)
+        env:
+          CAMOFOX_PIN: "6f74fa06df586b8dce7a86c6d2b35a1c13b498b2"
+          TERMUX_PKGS_PIN: "e462d86688f194debff9073440b3b6b72a7a35ae"
+        run: |
+          set -o pipefail
+          mkdir -p camofox-out-cfg && chmod 0777 camofox-out-cfg
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE:/work" \
+            -v "$GITHUB_WORKSPACE/camofox-out-cfg:/out" \
+            -w /work \
+            termux/termux-docker:aarch64 \
+            bash -c 'export CAMOFOX_PIN="$1" TERMUX_PKGS_PIN="$2"; shift 2; exec bash /work/camofox/configure.sh' \
+            _ "$CAMOFOX_PIN" "$TERMUX_PKGS_PIN"
+
+      - name: Upload configure logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: camofox-configure-logs
+          path: |
+            camofox-out-cfg/
+          if-no-files-found: warn
+          retention-days: 30
