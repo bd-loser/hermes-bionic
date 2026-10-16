@@ -63,7 +63,7 @@ echo "audit: HOME=$HOME (user $(id -un))"
 RSHIM=/out/.rustup-shim
 mkdir -p "$RSHIM" "$HOME/.cargo/bin"
 cat > "$RSHIM/rustup" <<'STUB'
-#!/usr/bin/env bash
+#!/data/data/com.termux/files/usr/bin/bash
 echo "rustup-stub: $*" | tee -a /out/rustup-stub.log
 exit 0
 STUB
