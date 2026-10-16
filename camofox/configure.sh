@@ -30,7 +30,7 @@ pkg install -y make python git curl tar xz-utils clang rust nodejs-lts pkg-confi
 # and friends live in the x11 repo.
 pkg install -y x11-repo >/dev/null 2>&1 || true
 apt update -y
-apt install -y gtk3 pulseaudio libvpx libicu nspr nss libwebp zlib libjpeg-turbo \
+apt install -y gtk3 pulseaudio libvpx libicu libnspr libnss libwebp zlib libjpeg-turbo \
   libpng freetype fontconfig gdk-pixbuf glib libffi libevent ffmpeg libcairo \
   libx11 libxcb libice libsm libxext
 
