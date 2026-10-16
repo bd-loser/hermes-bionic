@@ -29,7 +29,6 @@
  # ==============================================================
  
  option(env="RUSTFLAGS", nargs=1, help="Rust compiler flags")
--set_config("RUSTFLAGS", depends("RUSTFLAGS")(lambda flags: flags))
  
  
  # Rust compiler flags
