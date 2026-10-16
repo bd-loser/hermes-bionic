@@ -11,12 +11,13 @@ mkdir -p "$GITHUB_WORKSPACE/../camofox-out"
 OUT_HOST="$(cd "$GITHUB_WORKSPACE/../camofox-out" && pwd)"
 chmod 0777 "$OUT_HOST"
 
+# Pass pins as positional args: docker -e does not reliably forward step env.
 docker run --rm \
   -v "$GITHUB_WORKSPACE:/workspace" \
   -v "$OUT_HOST:/out" \
   -w /workspace \
-  -e CAMOFOX_PIN -e TERMUX_PKGS_PIN \
   termux/termux-docker:aarch64 \
-  bash /workspace/camofox/patch-audit.sh
+  bash -c 'export CAMOFOX_PIN="$1" TERMUX_PKGS_PIN="$2"; shift 2; exec bash /workspace/camofox/patch-audit.sh' \
+  _ "$CAMOFOX_PIN" "$TERMUX_PKGS_PIN"
 
 echo "$OUT_HOST"
