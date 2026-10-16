@@ -55,6 +55,7 @@ test -d "$SRC_DIR"
 # that step is moot anyway: phase 2 builds with the Termux mozconfig + Termux
 # rust (like termux-packages' firefox), not rustup toolchains. A logging stub
 # is therefore exact enough for a patch-application audit.
+echo "audit: HOME=$HOME (user $(id -un))"
 if ! command -v rustup >/dev/null 2>&1 && ! [ -x "$HOME/.cargo/bin/rustup" ]; then
   mkdir -p "$HOME/.cargo/bin"
   cat > "$HOME/.cargo/bin/rustup" <<'STUB'
@@ -62,8 +63,10 @@ if ! command -v rustup >/dev/null 2>&1 && ! [ -x "$HOME/.cargo/bin/rustup" ]; th
 echo "rustup-stub: $*" | tee -a /out/rustup-stub.log
 exit 0
 STUB
-  chmod +x "$HOME/.cargo/bin/rustup"
+  chmod 0755 "$HOME/.cargo/bin/rustup"
 fi
+ls -la "$HOME/.cargo/bin/" || echo "audit: no ~/.cargo/bin after stub step"
+"$HOME/.cargo/bin/rustup" target add selftest || echo "audit: stub selftest failed"
 
 step "apply Camoufox patch set via their scripts/patch.py"
 # BUILD_TARGET is what their multibuild.py exports before `make dir`. Their
@@ -98,7 +101,7 @@ for p in $(ls "$TF_DIR"/*.patch | sort); do
     git apply "$p" && PASS=$((PASS + 1)) && echo "PASS $name" >> "$OUT/audit-report.txt"
   else
     FAIL=$((FAIL + 1))
-    git apply --rejects "$p" >"$OUT/rejects/$name.apply.log" 2>&1 || true
+    git apply --reject "$p" >"$OUT/rejects/$name.apply.log" 2>&1 || true
     GOT=$(find . -name '*.rej' -newer "$OUT/audit-report.txt" 2>/dev/null | wc -l)
     echo "FAIL $name (rej files: $GOT; see rejects/$name.apply.log)" >> "$OUT/audit-report.txt"
   fi
