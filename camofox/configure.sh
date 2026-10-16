@@ -82,11 +82,12 @@ step "fetch Firefox $VERSION source + apply patches"
   # 0003/0012/0023/0028 are replaced by rebased versions in
   # /work/camofox/termux-patches; 0031 fixes a Firefox-157 regression absent
   # at 156 (its HWInference speech code does not exist here yet).
-  SKIP="0003- 0012- 0023- 0028- 0031-"
   FAIL=0
   for p in "$TFP"/*.patch; do
     name="$(basename "$p")"
-    case "$SKIP" in *"${name:0:5}- "*) echo "SKIP $name"; continue;; esac
+    case "$name" in
+      0003-*|0012-*|0023-*|0028-*|0031-*) echo "SKIP $name"; continue;;
+    esac
     if git apply --check "$p"; then
       git apply "$p" && git add -A && echo "TERMUX-PATCH PASS $name"
     else
