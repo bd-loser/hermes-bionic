@@ -25,10 +25,3 @@
      assert_rust_compile(target, rustc_target, rustc)
      return rustc_target
  
-@@ -611,7 +622,6 @@
- # ==============================================================
- 
- option(env="RUSTFLAGS", nargs=1, help="Rust compiler flags")
- 
- 
- # Rust compiler flags
