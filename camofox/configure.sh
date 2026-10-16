@@ -66,15 +66,41 @@ step "fetch Firefox $VERSION source + apply patches"
   git init -q -b main && git add -A
   git -c user.email=a@a -c user.name=a commit -qm "camoufox-patched tree"
 
-  step "apply camofox/termux-patches"
+  step "apply termux firefox patches (termux-packages set, minus replaced/no-op ones)"
   git config --global --add safe.directory "$(pwd)" || true
+  TFP="$WORK/termux-firefox"
+  if [ ! -d "$TFP" ]; then
+    mkdir -p "$TFP" && cd "$TFP"
+    git init -q
+    git remote add origin https://github.com/termux/termux-packages.git
+    git fetch -q --depth 1 origin "$TERMUX_PKGS_PIN"
+    git checkout -q FETCH_HEAD -- x11-packages/firefox
+    mv x11-packages/firefox/*.patch .
+    rm -rf x11-packages .git
+    cd "$WORK/camoufox/browser/$SRC_DIR"
+  fi
+  # 0003/0012/0023/0028 are replaced by rebased versions in
+  # /work/camofox/termux-patches; 0031 fixes a Firefox-157 regression absent
+  # at 156 (its HWInference speech code does not exist here yet).
+  SKIP="0003- 0012- 0023- 0028- 0031-"
   FAIL=0
-  for p in /work/camofox/termux-patches/*.patch; do
+  for p in "$TFP"/*.patch; do
     name="$(basename "$p")"
+    case "$SKIP" in *"${name:0:5}- "*) echo "SKIP $name"; continue;; esac
     if git apply --check "$p"; then
       git apply "$p" && git add -A && echo "TERMUX-PATCH PASS $name"
     else
       echo "TERMUX-PATCH FAIL $name"; FAIL=1
+    fi
+  done
+
+  step "apply our rebased camofox/termux-patches"
+  for p in /work/camofox/termux-patches/*.patch; do
+    name="$(basename "$p")"
+    if git apply --check "$p"; then
+      git apply "$p" && git add -A && echo "REBASED-PATCH PASS $name"
+    else
+      echo "REBASED-PATCH FAIL $name"; FAIL=1
     fi
   done
   [ "$FAIL" = 0 ] || { echo "error: termux-patches did not apply; aborting before configure" >&2; exit 1; }
