@@ -26,13 +26,13 @@ pkg install -y make python git curl tar xz-utils clang rust nodejs-lts pkg-confi
   binutils cbindgen-bin ccache >/dev/null 2>&1 || \
   apt install -y make python git curl tar xz-utils clang rust nodejs-lts pkg-config binutils ccache
 # System libs the configure-time checks need (mirrors TERMUX_PKG_DEPENDS/DEPENDS
-# of x11-packages/firefox, trimmed to configure-relevant ones).
-apt install -y gtk3 pulseaudio libvpx icu nspr nss libwebp zlib libjpeg-turbo \
+# of x11-packages/firefox, trimmed to configure-relevant ones). gtk3/nspr/nss
+# and friends live in the x11 repo.
+pkg install -y x11-repo >/dev/null 2>&1 || true
+apt update -y
+apt install -y gtk3 pulseaudio libvpx libicu nspr nss libwebp zlib libjpeg-turbo \
   libpng freetype fontconfig gdk-pixbuf glib libffi libevent ffmpeg libcairo \
-  libx11 libxcb libice libsm libxext >/dev/null 2>&1 || {
-  apt install -y gtk3 pulseaudio libvpx icu nspr nss libwebp zlib libjpeg-turbo \
-    libpng freetype fontconfig gdk-pixbuf glib libffi libevent ffmpeg libcairo \
-    libx11 libxcb libice libsm libxext; }
+  libx11 libxcb libice libsm libxext
 
 step "fetch camoufox @ $CAMOFOX_PIN"
 [ -d camoufox ] || {
