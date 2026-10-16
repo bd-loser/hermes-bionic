@@ -23,6 +23,10 @@ cd "$WORK"
 
 step() { printf '\n===== %s =====\n' "$*"; }
 
+step "install container tools"
+apt update -y >/dev/null 2>&1 || true
+pkg install -y make python git tar xz curl >/dev/null 2>&1 ||   apt install -y make python git tar xz curl >/dev/null 2>&1 || true
+
 step "fetch camoufox @ $CAMOFOX_PIN"
 curl -fsSL -o camoufox.tar.gz \
   "https://codeload.github.com/daijro/camoufox/tar.gz/$CAMOFOX_PIN"
