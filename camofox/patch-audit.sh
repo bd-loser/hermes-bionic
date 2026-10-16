@@ -49,6 +49,13 @@ make setup-minimal
 SRC_DIR="camoufox-$VERSION-$RELEASE"
 test -d "$SRC_DIR"
 
+# Their patcher's mozconfig step runs `rustup target add <target>`; without
+# rustup it dies before applying a single Camoufox patch.
+if ! command -v rustup >/dev/null 2>&1; then
+  curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal
+  export PATH="$HOME/.cargo/bin:$PATH"
+fi
+
 step "apply Camoufox patch set via their scripts/patch.py"
 # BUILD_TARGET is what their multibuild.py exports before `make dir`. Their
 # patcher reports per-patch failures and exits non-zero if any fail; the log

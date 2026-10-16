@@ -26,7 +26,7 @@ jobs:
         with:
           name: camofox-patch-audit
           path: |
-            ../camofox-out/
+            camofox-out/
             camofox-audit.log
           if-no-files-found: error
           retention-days: 30
