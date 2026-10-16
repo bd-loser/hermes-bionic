@@ -32,7 +32,7 @@ pkg install -y x11-repo >/dev/null 2>&1 || true
 apt update -y
 apt install -y ndk-sysroot gtk3 pulseaudio libvpx libicu libnspr libnss libwebp zlib libjpeg-turbo \
   libpng freetype fontconfig gdk-pixbuf glib libffi libevent ffmpeg libcairo \
-  libx11 libxcb libice libsm libxext
+  libx11 libxcb libice libsm libxext libandroid-shmem libandroid-spawn
 
 step "fetch camoufox @ $CAMOFOX_PIN"
 [ -d camoufox ] || {
@@ -131,7 +131,10 @@ for a in "$@"; do
     *) args+=("$a") ;;
   esac
 done
-exec "/data/data/com.termux/files/usr/bin/clang" --target=aarch64-unknown-linux-android24 --sysroot=/data/data/com.termux/files/usr "${args[@]}"
+# No --sysroot: this is the native Termux compiler; it resolves its own
+# prefix include/lib dirs (the phone builds the same code without one).
+# Forcing --sysroot shadows the baked-in include order (asm/types.h class).
+exec "/data/data/com.termux/files/usr/bin/clang" --target=aarch64-unknown-linux-android24 "${args[@]}"
 WEOF
   chmod 0755 "$CWRAP/$tool"
 done
@@ -143,7 +146,7 @@ TERMUX_HOST_PLATFORM=aarch64-linux-android
 CARGO_TARGET_NAME=aarch64-linux-android
 export CC=clang CXX=clang++
 export HOST_CC=clang HOST_CXX=clang++
-export BINDGEN_CFLAGS="--target=${TERMUX_HOST_PLATFORM} --sysroot=${PREFIX_DIR}/sysroot"
+export BINDGEN_CFLAGS="--target=aarch64-unknown-linux-android24"
 export BINDGEN_EXTRA_CLANG_ARGS_AARCH64_LINUX_ANDROID="$BINDGEN_CFLAGS"
 export CXXFLAGS="-U__ANDROID__ -D_LIBCPP_HAS_NO_C11_ALIGNED_ALLOC"
 export LDFLAGS="-landroid-shmem -landroid-spawn -llog"
