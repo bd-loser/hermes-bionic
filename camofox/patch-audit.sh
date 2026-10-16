@@ -24,8 +24,11 @@ cd "$WORK"
 step() { printf '\n===== %s =====\n' "$*"; }
 
 step "install container tools"
-apt update -y >/dev/null 2>&1 || true
-pkg install -y make python git tar xz curl >/dev/null 2>&1 ||   apt install -y make python git tar xz curl >/dev/null 2>&1 || true
+# Same mirror preamble as ci/build-in-container.sh; output stays visible.
+echo "deb https://packages.termux.dev/apt/termux-main stable main" \
+  > "${PREFIX:-/data/data/com.termux/files/usr}/etc/apt/sources.list"
+apt update -y
+apt install -y make python git curl tar xz-utils
 
 step "fetch camoufox @ $CAMOFOX_PIN"
 curl -fsSL -o camoufox.tar.gz \
