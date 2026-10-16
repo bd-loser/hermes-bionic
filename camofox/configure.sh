@@ -30,7 +30,7 @@ pkg install -y make python git curl tar xz-utils clang rust nodejs-lts pkg-confi
 # and friends live in the x11 repo.
 pkg install -y x11-repo >/dev/null 2>&1 || true
 apt update -y
-apt install -y gtk3 pulseaudio libvpx libicu libnspr libnss libwebp zlib libjpeg-turbo \
+apt install -y ndk-sysroot gtk3 pulseaudio libvpx libicu libnspr libnss libwebp zlib libjpeg-turbo \
   libpng freetype fontconfig gdk-pixbuf glib libffi libevent ffmpeg libcairo \
   libx11 libxcb libice libsm libxext
 
@@ -119,9 +119,19 @@ CWRAP="$HOME/clangwrap"
 mkdir -p "$CWRAP"
 for tool in clang clang++; do
   # Quoted delimiter: "$@" must survive verbatim into the wrapper script.
+  # Incoming --target args are stripped: cargo/cc-crate passes the unversioned
+  # host triple (aarch64-linux-android) which termux headers reject; the
+  # versioned triple below must be the one clang sees.
   cat > "$CWRAP/$tool" <<'WEOF'
 #!/data/data/com.termux/files/usr/bin/bash
-exec "/data/data/com.termux/files/usr/bin/clang" --target=aarch64-unknown-linux-android24 --sysroot=/data/data/com.termux/files/usr "$@"
+args=()
+for a in "$@"; do
+  case "$a" in
+    --target=*) ;;
+    *) args+=("$a") ;;
+  esac
+done
+exec "/data/data/com.termux/files/usr/bin/clang" --target=aarch64-unknown-linux-android24 --sysroot=/data/data/com.termux/files/usr "${args[@]}"
 WEOF
   chmod 0755 "$CWRAP/$tool"
 done
@@ -164,6 +174,9 @@ python3 ./mach configure 2>&1 | tee "$OUT/configure.log"
 RC=${PIPESTATUS[0]}
 set -e
 echo "configure exit: $RC" | tee -a "$OUT/configure.log"
+# Full mozbuild config.log (objdir) is essential for deep-diving failures.
+OBJCFG="$(find "$HOME/.mozbuild/srcdirs" -name config.log -path '*obj-*' 2>/dev/null | head -1)"
+[ -n "$OBJCFG" ] && cp "$OBJCFG" "$OUT/config-full.log" || echo "(no objdir config.log found)" | tee -a "$OUT/configure.log"
 [ "$RC" = 0 ] \
   && step "CONFIGURE OK" \
   || { step "CONFIGURE FAILED (tail above; full log in artifact)"; exit "$RC"; }
