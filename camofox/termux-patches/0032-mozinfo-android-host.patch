@@ -1,0 +1,14 @@
+--- a/testing/mozbase/mozinfo/mozinfo/mozinfo.py
++++ b/testing/mozbase/mozinfo/mozinfo/mozinfo.py
+@@ -95,6 +95,11 @@
+ 
+     info["os"] = "linux"
+     info["linux_distro"] = distribution
++elif system == "Android":
++    # Termux/Android host builds: platform.system() reports "Android".
++    # Configure-side emitters expect Linux semantics.
++    info["os"] = "linux"
++    version = os_version = platform.release()
+ elif system in ["DragonFly", "FreeBSD", "NetBSD", "OpenBSD"]:
+     info["os"] = "bsd"  # community builds
+     version = os_version = sys.platform
