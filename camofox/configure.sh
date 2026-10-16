@@ -160,6 +160,13 @@ sed -e "s|@TERMUX_HOST_PLATFORM@|${TERMUX_HOST_PLATFORM}|g" \
 # base.mozconfig lives at browser/assets/base.mozconfig
 cat ../assets/base.mozconfig "$WORK/termux-sub.mozconfig" > mozconfig
 
+step "include-path debug (asm/types.h truth)"
+ls -la "$TERMUX_PREFIX_INCLUDE/asm" 2>/dev/null || ls -la /data/data/com.termux/files/usr/include/asm 2>/dev/null || echo "NO /usr/include/asm"
+ls /data/data/com.termux/files/usr/include/asm-generic/types.h 2>/dev/null || echo "no asm-generic/types.h"
+echo '#include <sys/types.h>' | clang -E - >/dev/null 2>&1 && echo "sys/types.h preprocess OK" || echo "sys/types.h preprocess FAILED"
+echo '#include <asm/types.h>' | clang -E - >/dev/null 2>&1 && echo "asm/types.h OK" || echo "asm/types.h FAILED"
+clang -v 2>&1 | grep -E 'Target|InstalledDir'
+
 step "mach configure (log: $OUT/configure.log)"
 set +e
 # Termux's 0003 patch removes the set_config("RUSTFLAGS") handler from
