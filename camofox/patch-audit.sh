@@ -56,10 +56,11 @@ test -d "$SRC_DIR"
 # rust (like termux-packages' firefox), not rustup toolchains. A logging stub
 # is therefore exact enough for a patch-application audit.
 echo "audit: HOME=$HOME (user $(id -un))"
-# The image's /data mount is noexec, so an executable shim must live on the
-# runner bind mount; the ~/.cargo/bin copy is a symlink to it (their patcher
-# execs that literal path; symlinking keeps resolution on /workspace).
-RSHIM=/workspace/.rustup-shim
+# The image's /data mount is noexec and /workspace is read-only for the
+# container user, so the shim lives on /out (the runner bind mount, chmod'ed
+# world-writable host-side); ~/.cargo/bin/rustup is a symlink to it because
+# their patcher execs that literal path.
+RSHIM=/out/.rustup-shim
 mkdir -p "$RSHIM" "$HOME/.cargo/bin"
 cat > "$RSHIM/rustup" <<'STUB'
 #!/usr/bin/env bash

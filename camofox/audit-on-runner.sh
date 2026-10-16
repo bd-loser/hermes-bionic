@@ -10,6 +10,7 @@ set -euo pipefail
 mkdir -p "$GITHUB_WORKSPACE/camofox-out"
 OUT_HOST="$(cd "$GITHUB_WORKSPACE/camofox-out" && pwd)"
 chmod 0777 "$OUT_HOST"
+chmod 0777 "$OUT_HOST"
 
 # Pass pins as positional args: docker -e does not reliably forward step env.
 docker run --rm \
