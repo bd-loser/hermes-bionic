@@ -49,16 +49,20 @@ make setup-minimal
 SRC_DIR="camoufox-$VERSION-$RELEASE"
 test -d "$SRC_DIR"
 
-# Their patcher's mozconfig step runs `rustup target add <target>` via the
-# literal path ~/.cargo/bin/rustup; without rustup it dies before applying a
-# single Camoufox patch. rustup needs a real allowed-home for its settings
-# lock, and the container $HOME (the termux mount) is not one — so give it a
-# /tmp home and keep exporting it for the patcher's later literal call.
-if ! [ -x "$HOME/.cargo/bin/rustup" ]; then
-  export HOME=/tmp/rusthome
-  mkdir -p "$HOME"
-  curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal
-  export PATH="$HOME/.cargo/bin:$PATH"
+# Their patcher's mozconfig step runs the literal `~/.cargo/bin/rustup
+# target add aarch64-unknown-linux-gnu` (glibc cross setup) and exits if it
+# fails. Termux repos ship rust/cargo but no rustup package, and in this port
+# that step is moot anyway: phase 2 builds with the Termux mozconfig + Termux
+# rust (like termux-packages' firefox), not rustup toolchains. A logging stub
+# is therefore exact enough for a patch-application audit.
+if ! command -v rustup >/dev/null 2>&1 && ! [ -x "$HOME/.cargo/bin/rustup" ]; then
+  mkdir -p "$HOME/.cargo/bin"
+  cat > "$HOME/.cargo/bin/rustup" <<'STUB'
+#!/usr/bin/env bash
+echo "rustup-stub: $*" | tee -a /out/rustup-stub.log
+exit 0
+STUB
+  chmod +x "$HOME/.cargo/bin/rustup"
 fi
 
 step "apply Camoufox patch set via their scripts/patch.py"
