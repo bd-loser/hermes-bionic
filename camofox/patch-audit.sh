@@ -49,9 +49,14 @@ make setup-minimal
 SRC_DIR="camoufox-$VERSION-$RELEASE"
 test -d "$SRC_DIR"
 
-# Their patcher's mozconfig step runs `rustup target add <target>`; without
-# rustup it dies before applying a single Camoufox patch.
-if ! command -v rustup >/dev/null 2>&1; then
+# Their patcher's mozconfig step runs `rustup target add <target>` via the
+# literal path ~/.cargo/bin/rustup; without rustup it dies before applying a
+# single Camoufox patch. rustup needs a real allowed-home for its settings
+# lock, and the container $HOME (the termux mount) is not one — so give it a
+# /tmp home and keep exporting it for the patcher's later literal call.
+if ! [ -x "$HOME/.cargo/bin/rustup" ]; then
+  export HOME=/tmp/rusthome
+  mkdir -p "$HOME"
   curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal
   export PATH="$HOME/.cargo/bin:$PATH"
 fi
