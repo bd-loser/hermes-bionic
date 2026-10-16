@@ -1,0 +1,50 @@
+name: camofox-build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore camoufox build caches
+        uses: actions/cache@v4
+        with:
+          path: |
+            camofox-cache/ccache
+          key: camofox-build-v1-${{ hashFiles('camofox/**') }}
+          restore-keys: |
+            camofox-build-v1-
+
+      - name: configure + build Camoufox for Termux (Bionic)
+        env:
+          CAMOFOX_PIN: "6f74fa06df586b8dce7a86c6d2b35a1c13b498b2"
+          TERMUX_PKGS_PIN: "e462d86688f194debff9073440b3b6b72a7a35ae"
+          CAMOFOX_BUILD: "1"
+        run: |
+          set -o pipefail
+          mkdir -p camofox-out-cfg && chmod 0777 camofox-out-cfg
+          mkdir -p camofox-cache/ccache && chmod -R 777 camofox-cache
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE:/work" \
+            -v "$GITHUB_WORKSPACE/camofox-out-cfg:/out" \
+            -v "$GITHUB_WORKSPACE/camofox-cache:/ci-cache" \
+            -w /work \
+            termux/termux-docker:aarch64 \
+            bash -c 'export CAMOFOX_PIN="$1" TERMUX_PKGS_PIN="$2" CAMOFOX_BUILD="$3"; shift 3; exec bash /work/camofox/configure.sh' \
+            _ "$CAMOFOX_PIN" "$TERMUX_PKGS_PIN" "$CAMOFOX_BUILD"
+
+      - name: Upload build logs + binary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: camofox-build-out
+          path: camofox-out-cfg/
+          if-no-files-found: warn
+          retention-days: 30

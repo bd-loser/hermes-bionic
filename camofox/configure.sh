@@ -186,7 +186,37 @@ set -e
 echo "configure exit: $RC" | tee -a "$OUT/configure.log"
 # Full mozbuild config.log (objdir) is essential for deep-diving failures.
 OBJCFG="$(find "$HOME/.mozbuild/srcdirs" -name config.log -path '*obj-*' 2>/dev/null | head -1)"
-[ -n "$OBJCFG" ] && cp "$OBJCFG" "$OUT/config-full.log" || echo "(no objdir config.log found)" | tee -a "$OUT/configure.log"
+[ -n "$OBJCFG" ] && cp "$OBJCFG" "$OUT/config-full.log" || echo "(no objdir config.log found)"
+cd "$WORK/camoufox/browser/$SRC_DIR"
+[ "$RC" = 0 ] \
+  && step "CONFIGURE OK" \
+  || { step "CONFIGURE FAILED (tail above; full log in artifact)"; exit "$RC"; }
+
+if [ "${CAMOFOX_BUILD:-0}" != "1" ]; then
+  step "configure-only run done (set CAMOFOX_BUILD=1 for mach build)"
+  exit 0
+fi
+
+step "mach build (this is the long one)"
+# ccache placement for persistence across runs.
+export CCACHE_DIR="/ci-cache/ccache"
+mkdir -p "$CCACHE_DIR"
+export CCacheGravity="1"
+NPROC=$(nproc)
+echo "building with -j$NPROC, CCACHE_DIR=$CCACHE_DIR"
+time python3 ./mach build -j"$NPROC" 2>&1 | tee "$OUT/build.log"
+RC_B=${PIPESTATUS[0]}
+echo "build exit: $RC_B" | tee -a "$OUT/build.log"
+BIN="$(find "$WORK/camoufox/browser/$SRC_DIR/obj-"*/dist/bin -name camoufox* -type f 2>/dev/null | head -1)"
+if [ "$RC_B" = 0 ] && [ -n "$BIN" ]; then
+  echo "BUILD OK: $BIN" | tee -a "$OUT/build.log"
+  ls -la "$BIN" | tee -a "$OUT/build.log"
+  cp "$BIN"* "$OUT/" 2>/dev/null || true
+  exit 0
+else
+  echo "BUILD FAILED or binary missing (log preserved)" >&2
+  exit "${RC_B:-1}"
+fi | tee -a "$OUT/configure.log"
 [ "$RC" = 0 ] \
   && step "CONFIGURE OK" \
   || { step "CONFIGURE FAILED (tail above; full log in artifact)"; exit "$RC"; }
