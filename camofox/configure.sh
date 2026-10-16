@@ -133,6 +133,10 @@ cat ../assets/base.mozconfig "$WORK/termux-sub.mozconfig" > mozconfig
 
 step "mach configure (log: $OUT/configure.log)"
 set +e
+# Termux's 0003 patch removes the set_config("RUSTFLAGS") handler from
+# rust.configure (cargo reads CARGO_TARGET_*_RUSTFLAGS at build time). With
+# that gone, a stray RUSTFLAGS env var becomes a configure error — unset it.
+unset RUSTFLAGS
 # ./mach's '#!/usr/bin/env python3' shebang fails on the image (no /usr/bin/env);
 # run it through the interpreter directly.
 python3 ./mach configure 2>&1 | tee "$OUT/configure.log"
