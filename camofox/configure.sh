@@ -106,7 +106,9 @@ cat ../assets/base.mozconfig "$WORK/termux-sub.mozconfig" > mozconfig
 
 step "mach configure (log: $OUT/configure.log)"
 set +e
-./mach configure 2>&1 | tee "$OUT/configure.log"
+# ./mach's '#!/usr/bin/env python3' shebang fails on the image (no /usr/bin/env);
+# run it through the interpreter directly.
+python3 ./mach configure 2>&1 | tee "$OUT/configure.log"
 RC=${PIPESTATUS[0]}
 set -e
 echo "configure exit: $RC" | tee -a "$OUT/configure.log"
