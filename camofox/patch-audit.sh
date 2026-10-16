@@ -56,17 +56,19 @@ test -d "$SRC_DIR"
 # rust (like termux-packages' firefox), not rustup toolchains. A logging stub
 # is therefore exact enough for a patch-application audit.
 echo "audit: HOME=$HOME (user $(id -un))"
-if ! command -v rustup >/dev/null 2>&1 && ! [ -x "$HOME/.cargo/bin/rustup" ]; then
-  mkdir -p "$HOME/.cargo/bin"
-  cat > "$HOME/.cargo/bin/rustup" <<'STUB'
+# The image's /data mount is noexec, so an executable shim must live on the
+# runner bind mount; the ~/.cargo/bin copy is a symlink to it (their patcher
+# execs that literal path; symlinking keeps resolution on /workspace).
+RSHIM=/workspace/.rustup-shim
+mkdir -p "$RSHIM" "$HOME/.cargo/bin"
+cat > "$RSHIM/rustup" <<'STUB'
 #!/usr/bin/env bash
 echo "rustup-stub: $*" | tee -a /out/rustup-stub.log
 exit 0
 STUB
-  chmod 0755 "$HOME/.cargo/bin/rustup"
-fi
-ls -la "$HOME/.cargo/bin/" || echo "audit: no ~/.cargo/bin after stub step"
-"$HOME/.cargo/bin/rustup" target add selftest || echo "audit: stub selftest failed"
+chmod 0755 "$RSHIM/rustup"
+ln -sf "$RSHIM/rustup" "$HOME/.cargo/bin/rustup"
+"$HOME/.cargo/bin/rustup" target add selftest && echo "audit: stub selftest ok"
 
 step "apply Camoufox patch set via their scripts/patch.py"
 # BUILD_TARGET is what their multibuild.py exports before `make dir`. Their
