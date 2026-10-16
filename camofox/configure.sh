@@ -118,9 +118,10 @@ step "versioned-triple clang wrapper (termux toolchain emulation)"
 CWRAP="$HOME/clangwrap"
 mkdir -p "$CWRAP"
 for tool in clang clang++; do
-  cat > "$CWRAP/$tool" <<WEOF
+  # Quoted delimiter: "$@" must survive verbatim into the wrapper script.
+  cat > "$CWRAP/$tool" <<'WEOF'
 #!/data/data/com.termux/files/usr/bin/bash
-exec "$PREFIX_DIR/bin/$tool" --target=aarch64-unknown-linux-android24 "--sysroot=$PREFIX_DIR" "$@"
+exec "/data/data/com.termux/files/usr/bin/clang" --target=aarch64-unknown-linux-android24 --sysroot=/data/data/com.termux/files/usr "$@"
 WEOF
   chmod 0755 "$CWRAP/$tool"
 done
