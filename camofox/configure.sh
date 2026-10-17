@@ -157,6 +157,10 @@ args=()
 for a in "$@"; do
   case "$a" in
     --target=*) ;;
+    # Legacy cc-crate injection: flips vendored C code (glslopt et al.) into
+    # NDK-only branches (#include <log/log.h>) that Termux cannot satisfy.
+    # __ANDROID__ remains defined via the versioned triple.
+    -DANDROID) ;;
     *) args+=("$a") ;;
   esac
 done
