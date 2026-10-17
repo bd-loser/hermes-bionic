@@ -191,7 +191,9 @@ export CXXFLAGS="-U__ANDROID__ -D_LIBCPP_HAS_NO_C11_ALIGNED_ALLOC"
 # otherwise miss the termux libc++ runtime (ABI __ndk1).
 # -lm: FF's android .so links assume NDK libm (sin/cos/exp in liblgpllibs etc.).
 # Termux ships it inside ndk-multilib; Android's /system/lib64 provides it at runtime.
-export LDFLAGS="-landroid-shmem -landroid-spawn -llog -L$PREFIX_DIR/lib -lc++_shared -L$PREFIX_DIR/opt/ndk-multilib/aarch64-linux-android/lib -lm"
+# -l:libm.a: static, because modern Android merged libm into libc and does
+# not ship /system libm.so — a shared DT_NEEDED would break on real phones.
+export LDFLAGS="-landroid-shmem -landroid-spawn -llog -L$PREFIX_DIR/lib -lc++_shared -L$PREFIX_DIR/opt/ndk-multilib/aarch64-linux-android/lib -l:libm.a"
 # gkrust OOM guard, same as termux
 export CARGO_TARGET_AARCH64_LINUX_ANDROID_RUSTFLAGS+=" -C debuginfo=1"
 env | grep -E '^(CC|CXX|HOST_|BINDGEN|CXXFLAGS|LDFLAGS|CARGO)' | tee "$OUT/env.txt"
