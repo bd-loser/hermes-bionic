@@ -1,0 +1,11 @@
+--- a/js/src/threading/posix/PosixThread.cpp
++++ b/js/src/threading/posix/PosixThread.cpp
+@@ -123,7 +123,7 @@
+   MOZ_RELEASE_ASSERT(len >= 16);
+ 
+   int rv = -1;
+-#ifdef HAVE_PTHREAD_GETNAME_NP
++#if defined(HAVE_PTHREAD_GETNAME_NP) && !defined(__ANDROID_API__)
+   rv = pthread_getname_np(pthread_self(), nameBuffer, len);
+ #elif defined(HAVE_PTHREAD_GET_NAME_NP)
+   pthread_get_name_np(pthread_self(), nameBuffer, len);
