@@ -236,9 +236,12 @@ step "cargo-linker + maturin android env"
 OBJDIR="$(ls -d "$WORK/camoufox/browser/$SRC_DIR"/obj-* 2>/dev/null | head -1)"
 echo "objdir: ${OBJDIR:-MISSING}" | tee -a "$OUT/build.log"
 [ -n "$OBJDIR" ] || { ls "$WORK/camoufox/browser/$SRC_DIR" >&2; echo "no objdir after configure" >&2; exit 1; }
-mkdir -p "$OBJDIR/build"
+# rust.mk references $SRC_DIR/build/cargo-linker (topsrcdir), created by the
+# cross-compile logic at configure time — absent with our native host pair.
+mkdir -p "$WORK/camoufox/browser/$SRC_DIR/build" "$OBJDIR/build"
+ln -sf "$HOME/clangwrap/clang" "$WORK/camoufox/browser/$SRC_DIR/build/cargo-linker"
 ln -sf "$HOME/clangwrap/clang" "$OBJDIR/build/cargo-linker"
-ls -la "$OBJDIR/build/cargo-linker" | tee -a "$OUT/build.log"
+ls -la "$WORK/camoufox/browser/$SRC_DIR/build/cargo-linker" | tee -a "$OUT/build.log"
 
 step "mach build (this is the long one)"
 # ccache placement for persistence across runs.
