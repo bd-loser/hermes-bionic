@@ -30,7 +30,7 @@ pkg install -y make python git curl tar xz-utils clang rust nodejs-lts pkg-confi
 # and friends live in the x11 repo.
 pkg install -y x11-repo >/dev/null 2>&1 || true
 apt update -y
-apt install -y ndk-sysroot gtk3 pulseaudio libvpx libicu libnspr libnss libwebp zlib libjpeg-turbo \
+apt install -y ndk-sysroot ndk-multilib gtk3 pulseaudio libvpx libicu libnspr libnss libwebp zlib libjpeg-turbo \
   libpng freetype fontconfig gdk-pixbuf glib libffi libevent ffmpeg libcairo \
   libx11 libxcb libice libsm libxext libandroid-shmem libandroid-spawn
 
@@ -189,7 +189,9 @@ export BINDGEN_EXTRA_CLANG_ARGS_AARCH64_LINUX_ANDROID="$BINDGEN_CFLAGS"
 export CXXFLAGS="-U__ANDROID__ -D_LIBCPP_HAS_NO_C11_ALIGNED_ALLOC"
 # -lc++_shared: bare ld.lld links (small plugin .so's like gmp-clearkey)
 # otherwise miss the termux libc++ runtime (ABI __ndk1).
-export LDFLAGS="-landroid-shmem -landroid-spawn -llog -L$PREFIX_DIR/lib -lc++_shared"
+# -lm: FF's android .so links assume NDK libm (sin/cos/exp in liblgpllibs etc.).
+# Termux ships it inside ndk-multilib; Android's /system/lib64 provides it at runtime.
+export LDFLAGS="-landroid-shmem -landroid-spawn -llog -L$PREFIX_DIR/lib -lc++_shared -L$PREFIX_DIR/opt/ndk-multilib/aarch64-linux-android/lib -lm"
 # gkrust OOM guard, same as termux
 export CARGO_TARGET_AARCH64_LINUX_ANDROID_RUSTFLAGS+=" -C debuginfo=1"
 env | grep -E '^(CC|CXX|HOST_|BINDGEN|CXXFLAGS|LDFLAGS|CARGO)' | tee "$OUT/env.txt"
