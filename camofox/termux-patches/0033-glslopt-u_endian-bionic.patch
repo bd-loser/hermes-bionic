@@ -1,14 +1,19 @@
 --- a/third_party/rust/glslopt/glsl-optimizer/src/util/u_endian.h
 +++ b/third_party/rust/glslopt/glsl-optimizer/src/util/u_endian.h
-@@ -73,7 +73,10 @@
- # define UTIL_ARCH_BIG_ENDIAN 1
- #endif
+@@ -27,7 +27,15 @@
+ #ifndef U_ENDIAN_H
+ #define U_ENDIAN_H
  
--#elif defined(_WIN32) || defined(ANDROID)
-+#elif defined(_WIN32) || defined(ANDROID) || defined(__ANDROID__)
-+/* Termux (Bionic) native builds: aarch64 is little-endian; bionic's
-+   <endian.h> lacks the glibc __BYTE_ORDER macros u_endian.h's linux
-+   branch expects, so hardcode like upstream does for Windows/NDK. */
+-#ifdef HAVE_ENDIAN_H
++#if defined(__BYTE_ORDER__) && defined(__ORDER_LITTLE_ENDIAN__) && \
++    __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
++# define UTIL_ARCH_LITTLE_ENDIAN 1
++# define UTIL_ARCH_BIG_ENDIAN 0
++#elif defined(__BYTE_ORDER__) && defined(__ORDER_BIG_ENDIAN__) && \
++    __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
++# define UTIL_ARCH_LITTLE_ENDIAN 0
++# define UTIL_ARCH_BIG_ENDIAN 1
++#elif defined(HAVE_ENDIAN_H)
+ #include <endian.h>
  
- #define UTIL_ARCH_LITTLE_ENDIAN 1
- #define UTIL_ARCH_BIG_ENDIAN 0
+ #if __BYTE_ORDER == __LITTLE_ENDIAN
