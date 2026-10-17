@@ -222,6 +222,22 @@ if [ "${CAMOFOX_BUILD:-0}" != "1" ]; then
   exit 0
 fi
 
+step "cargo-linker + maturin android env"
+# Firefox routes cargo linking through objdir/build/cargo-linker (a symlink
+# its cross-compile logic creates from NDK wrappers). With a native Android
+# host/target pair the file is never created, but the linker reference is:
+# create it ourselves, pointing at the versioned-triple wrapped clang.
+OBJDIR="$(find "$HOME/.mozbuild/srcdirs" -maxdepth 3 -type d -name 'obj-*' 2>/dev/null | head -1)"
+echo "objdir: ${OBJDIR:-MISSING}" | tee -a "$OUT/build.log"
+[ -n "$OBJDIR" ] || { echo "no objdir after configure" >&2; exit 1; }
+mkdir -p "$OBJDIR/build"
+ln -sf "$HOME/clangwrap/clang" "$OBJDIR/build/cargo-linker"
+ls -la "$OBJDIR/build/cargo-linker" | tee -a "$OUT/build.log"
+# pyo3 wheels built inside the mach venv go through maturin, which refuses
+# to act on Android without an explicit API level (upstream never builds on
+# an Android host, so it never sets this).
+export ANDROID_API_LEVEL=24
+
 step "mach build (this is the long one)"
 # ccache placement for persistence across runs.
 export CCACHE_DIR="/ci-cache/ccache"
