@@ -105,6 +105,31 @@ step "fetch Firefox $VERSION source + apply patches"
     fi
   done
   [ "$FAIL" = 0 ] || { echo "error: termux-patches did not apply; aborting before configure" >&2; exit 1; }
+
+  step "refresh vendored cargo checksums (patches edit vendored crates)"
+  # Cargo verifies every file listed in a vendored crate's
+  # .cargo-checksum.json; patches that touch third_party/rust/* must update
+  # those entries or the build dies ("directory sources are not intended to
+  # be edited"). Recompute drift for all vendored crates in one sweep.
+  python3 - <<'PYCS'
+import hashlib, json
+from pathlib import Path
+for cc in Path(".").glob("third_party/rust/*/.cargo-checksum.json"):
+    d = json.loads(cc.read_text())
+    files = d.get("files", {})
+    changed = False
+    for rel, sha in list(files.items()):
+        f = cc.parent / rel
+        if f.is_file():
+            h = hashlib.sha256(f.read_bytes()).hexdigest()
+            if h != sha:
+                files[rel] = h
+                changed = True
+    if changed:
+        cc.write_text(json.dumps(d, separators=(",", ":")))
+        print("checksums updated:", cc.parent.name)
+PYCS
+  git add -A
   git -c user.email=a@a -c user.name=a commit -qm "termux graft" || true
 }
 cd "$WORK/camoufox/browser/$SRC_DIR"
