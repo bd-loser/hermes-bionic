@@ -1,0 +1,14 @@
+--- a/third_party/rust/glslopt/glsl-optimizer/src/util/u_endian.h
++++ b/third_party/rust/glslopt/glsl-optimizer/src/util/u_endian.h
+@@ -73,7 +73,10 @@
+ # define UTIL_ARCH_BIG_ENDIAN 1
+ #endif
+ 
+-#elif defined(_WIN32) || defined(ANDROID)
++#elif defined(_WIN32) || defined(ANDROID) || defined(__ANDROID__)
++/* Termux (Bionic) native builds: aarch64 is little-endian; bionic's
++   <endian.h> lacks the glibc __BYTE_ORDER macros u_endian.h's linux
++   branch expects, so hardcode like upstream does for Windows/NDK. */
+ 
+ #define UTIL_ARCH_LITTLE_ENDIAN 1
+ #define UTIL_ARCH_BIG_ENDIAN 0
