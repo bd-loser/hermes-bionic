@@ -1,0 +1,13 @@
+--- a/xpcom/io/nsLocalFileUnix.cpp
++++ b/xpcom/io/nsLocalFileUnix.cpp
+@@ -1430,7 +1430,9 @@
+   using UtimesFn = int (*)(const char*, const timeval*);
+   UtimesFn utimesFn = &utimes;
+ 
+-#if HAVE_LUTIMES
++#if HAVE_LUTIMES && !defined(__ANDROID_API__)
++  /* Bionic: __USE_BSD (from -D_GNU_SOURCE) declares lutimes() but the
++     API-24 libc does not export it — probe lies, so exclude on Android. */
+   if (!aFollowLinks) {
+     utimesFn = &lutimes;
+   }

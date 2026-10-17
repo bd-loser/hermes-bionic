@@ -48,3 +48,26 @@ Reject files are preserved in the run's `camofox-patch-audit` artifact
 - bind mounts must be chmod 0777 host-side; `docker -e` is unreliable → pass pins as argv
 - `rustup` is not in Termux repos; phase 2 uses Termux `rust` (as termux-packages does)
 - shim shebangs must use the absolute Termux bash path (no `/usr/bin/env`)
+
+## Unified root cause — recent build errors (2026-10-17)
+
+All native-Bionic build errors trace to one meta-cause: **desktop Firefox has
+never been compiled natively on an Android/Bionic host**, so its global build
+assumptions break there in three ways:
+
+1. "Android target == NDK cross-compile": implicit NDK `-DANDROID`, NDK
+   `libm`, NDK `__ndk1` libc++ — each misfires differently on Termux
+   (fixed: wrapper strips `-DANDROID`; `ndk-multilib` provides static `libm`;
+   `-lc++_shared` for bare ld.lld links).
+2. FF's standard `-D_GNU_SOURCE` turns on Bionic feature-test macros
+   (`__USE_BSD`) that *declare* glibc-ish symbols the API-24 libc does not
+   export (`lutimes`, `pthread_getname_np`) — configure probes lie, links
+   explode (fixed: 0034/0035 guards use Firefox's existing fallbacks).
+3. Termux's own `-U__ANDROID__` flips platform identity off where vendored
+   code tests it (fixed: 0033 uses compiler builtins).
+
+Error ledger: cargo vendor checksums → checksum sweep; mozinfo Android →
+0032; js pthread_getname_np → 0034; nsDocShell icu::Locale → bundled-ICU
+(drop system-icu); glslopt → 0033 v2; host relrhack → native HOST_CXX +
+libc++; libmozgtk inject objects → --disable-elf-hack; gmp-clearkey +
+liblgpllibs links → LDFLAGS libc++/libm; lutimes → 0035.
