@@ -34,6 +34,10 @@ apt install -y ndk-sysroot gtk3 pulseaudio libvpx libicu libnspr libnss libwebp 
   libpng freetype fontconfig gdk-pixbuf glib libffi libevent ffmpeg libcairo \
   libx11 libxcb libice libsm libxext libandroid-shmem libandroid-spawn
 
+# pyo3/uniffi wheels in the mach venvs are built by maturin, which refuses
+# Android without an explicit API level (upstream never builds on Android).
+export ANDROID_API_LEVEL=24
+
 step "fetch camoufox @ $CAMOFOX_PIN"
 [ -d camoufox ] || {
   curl -fsSL -o camoufox.tar.gz \
@@ -227,16 +231,14 @@ step "cargo-linker + maturin android env"
 # its cross-compile logic creates from NDK wrappers). With a native Android
 # host/target pair the file is never created, but the linker reference is:
 # create it ourselves, pointing at the versioned-triple wrapped clang.
-OBJDIR="$(find "$HOME/.mozbuild/srcdirs" -maxdepth 3 -type d -name 'obj-*' 2>/dev/null | head -1)"
+# The objdir lives inside the source tree (MOZ_OBJDIR set by base.mozconfig);
+# ~/.mozbuild/srcdirs only holds the mach virtualenvs.
+OBJDIR="$(ls -d "$WORK/camoufox/browser/$SRC_DIR"/obj-* 2>/dev/null | head -1)"
 echo "objdir: ${OBJDIR:-MISSING}" | tee -a "$OUT/build.log"
-[ -n "$OBJDIR" ] || { echo "no objdir after configure" >&2; exit 1; }
+[ -n "$OBJDIR" ] || { ls "$WORK/camoufox/browser/$SRC_DIR" >&2; echo "no objdir after configure" >&2; exit 1; }
 mkdir -p "$OBJDIR/build"
 ln -sf "$HOME/clangwrap/clang" "$OBJDIR/build/cargo-linker"
 ls -la "$OBJDIR/build/cargo-linker" | tee -a "$OUT/build.log"
-# pyo3 wheels built inside the mach venv go through maturin, which refuses
-# to act on Android without an explicit API level (upstream never builds on
-# an Android host, so it never sets this).
-export ANDROID_API_LEVEL=24
 
 step "mach build (this is the long one)"
 # ccache placement for persistence across runs.
