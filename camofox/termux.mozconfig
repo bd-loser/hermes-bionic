@@ -20,7 +20,10 @@ ac_add_options --disable-bootstrap
 # --- features (Termux firefox set) ---
 ac_add_options --enable-system-ffi
 ac_add_options --enable-system-pixman
-ac_add_options --with-system-icu
+# NOTE: --with-system-icu deliberately omitted (Termux template had it):
+# system-icu renames namespaces (icu_78) and FF code expects its bundled
+# icu/vendored layout — nsDocShell icu::Locale failed to build. Bundled ICU
+# is Camoufox's own default (base.mozconfig has no icu option).
 ac_add_options --with-system-jpeg=@TERMUX_PREFIX@
 ac_add_options --with-system-libevent
 ac_add_options --with-system-libvpx
