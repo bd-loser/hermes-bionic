@@ -187,7 +187,9 @@ export HOST_LDFLAGS="-L$PREFIX_DIR/lib -lc++_shared"
 export BINDGEN_CFLAGS="--target=aarch64-unknown-linux-android24"
 export BINDGEN_EXTRA_CLANG_ARGS_AARCH64_LINUX_ANDROID="$BINDGEN_CFLAGS"
 export CXXFLAGS="-U__ANDROID__ -D_LIBCPP_HAS_NO_C11_ALIGNED_ALLOC"
-export LDFLAGS="-landroid-shmem -landroid-spawn -llog"
+# -lc++_shared: bare ld.lld links (small plugin .so's like gmp-clearkey)
+# otherwise miss the termux libc++ runtime (ABI __ndk1).
+export LDFLAGS="-landroid-shmem -landroid-spawn -llog -L$PREFIX_DIR/lib -lc++_shared"
 # gkrust OOM guard, same as termux
 export CARGO_TARGET_AARCH64_LINUX_ANDROID_RUSTFLAGS+=" -C debuginfo=1"
 env | grep -E '^(CC|CXX|HOST_|BINDGEN|CXXFLAGS|LDFLAGS|CARGO)' | tee "$OUT/env.txt"
