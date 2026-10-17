@@ -178,7 +178,12 @@ step "build env (mirrors termux build.sh pre_configure)"
 TERMUX_HOST_PLATFORM=aarch64-linux-android
 CARGO_TARGET_NAME=aarch64-linux-android
 export CC=clang CXX=clang++
-export HOST_CC=clang HOST_CXX=clang++
+# Host tools (elfhack relrhack etc.) are compiled AND linked natively: use
+# the absolute native compiler and add the libc++ library the host linker
+# needs (ld.lld adds no default -lc++_shared; termux libc++ ABI is __ndk1).
+export HOST_CC="$PREFIX_DIR/bin/clang"
+export HOST_CXX="$PREFIX_DIR/bin/clang++"
+export HOST_LDFLAGS="-L$PREFIX_DIR/lib -lc++_shared"
 export BINDGEN_CFLAGS="--target=aarch64-unknown-linux-android24"
 export BINDGEN_EXTRA_CLANG_ARGS_AARCH64_LINUX_ANDROID="$BINDGEN_CFLAGS"
 export CXXFLAGS="-U__ANDROID__ -D_LIBCPP_HAS_NO_C11_ALIGNED_ALLOC"
