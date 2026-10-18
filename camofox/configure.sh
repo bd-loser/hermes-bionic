@@ -268,11 +268,19 @@ echo "building with -j$NPROC, CCACHE_DIR=$CCACHE_DIR"
 time python3 ./mach build -j"$NPROC" 2>&1 | tee "$OUT/build.log"
 RC_B=${PIPESTATUS[0]}
 echo "build exit: $RC_B" | tee -a "$OUT/build.log"
+OBJDIR="$(ls -d "$WORK/camoufox/browser/$SRC_DIR"/obj-* 2>/dev/null | head -1)"  # refresh
 BIN="$(find "$WORK/camoufox/browser/$SRC_DIR/obj-"*/dist/bin -name camoufox* -type f 2>/dev/null | head -1)"
+HERMES_PKGVER="$(cat "$WORK/camoufox/browser/$SRC_DIR/browser/config/version.txt" 2>/dev/null || echo unknown)"
 if [ "$RC_B" = 0 ] && [ -n "$BIN" ]; then
   echo "BUILD OK: $BIN" | tee -a "$OUT/build.log"
   ls -la "$BIN" | tee -a "$OUT/build.log"
   cp "$BIN"* "$OUT/" 2>/dev/null || true
+  DISTBIN="$(dirname "$BIN")"
+  PKG="$OUT/camoufox-termux-$HERMES_PKGVER-aarch64"
+  step "package full dist/bin tree"
+  tar -czf "$PKG.tar.gz" -C "$DISTBIN" . 
+  ( cd "$(dirname "$PKG.tar.gz")" && sha256sum "$(basename "$PKG.tar.gz")" > "$(basename "$PKG.tar.gz").sha256" )
+  du -sh "$PKG.tar.gz" | tee -a "$OUT/build.log"
   exit 0
 else
   echo "BUILD FAILED or binary missing (log preserved)" >&2
