@@ -71,3 +71,7 @@ Error ledger: cargo vendor checksums → checksum sweep; mozinfo Android →
 (drop system-icu); glslopt → 0033 v2; host relrhack → native HOST_CXX +
 libc++; libmozgtk inject objects → --disable-elf-hack; gmp-clearkey +
 liblgpllibs links → LDFLAGS libc++/libm; lutimes → 0035.
+
+- Upstream CLI `--screenshot` hang (juggler Helper.js double-teardown) filed
+  upstream: https://github.com/daijro/camoufox/issues/909 — juggler path
+  verified working on-device (playwright-core + linux-platform preload).
