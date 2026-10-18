@@ -282,12 +282,13 @@ if [ "$RC_B" = 0 ] && [ -n "$BIN" ]; then
   echo "BUILD OK: $BIN" | tee -a "$OUT/build.log"
   ls -la "$BIN" | tee -a "$OUT/build.log"
   cp "$BIN"* "$OUT/" 2>/dev/null || true
-  DISTBIN="$(dirname "$BIN")"
-  PKG="$OUT/camoufox-termux-$HERMES_PKGVER-aarch64"
-  step "package full dist/bin tree"
-  tar -czf "$PKG.tar.gz" -C "$DISTBIN" . 
-  ( cd "$(dirname "$PKG.tar.gz")" && sha256sum "$(basename "$PKG.tar.gz")" > "$(basename "$PKG.tar.gz").sha256" )
-  du -sh "$PKG.tar.gz" | tee -a "$OUT/build.log"
+  step "mach package (omni.ja + release layout)"
+  python3 ./mach package 2>&1 | tail -20 | tee -a "$OUT/build.log"
+  TARGET_TAR="$(ls -t "$WORK/camoufox/browser/$SRC_DIR/obj-"*/dist/*.tar.* 2>/dev/null | head -1)"
+  [ -n "$TARGET_TAR" ] || { echo "package output missing" >&2; exit 1; }
+  ls -la "$TARGET_TAR" | tee -a "$OUT/build.log"
+  cp "$TARGET_TAR" "$OUT/"
+  ( cd "$OUT" && sha256sum "$(basename "$TARGET_TAR")" > "$(basename "$TARGET_TAR").sha256" )
   exit 0
 else
   echo "BUILD FAILED or binary missing (log preserved)" >&2
