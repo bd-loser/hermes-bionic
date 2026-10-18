@@ -44,6 +44,7 @@ often fails. This project compiles them once in CI and installs them offline.
 
 - [Hermes Agent](https://github.com/NousResearch/hermes-agent): upstream project
 - [opencode-bionic](https://github.com/bd-loser/opencode-bionic): same approach for OpenCode
+- **[camoufox-bionic](https://github.com/bd-loser/camoufox-bionic)**: Bionic-native Camoufox (anti-fingerprint Firefox) for Termux — built natively, no glibc/proot; powers Hermes' Camofox provider
 
 ## Contributing and issues
 
