@@ -71,6 +71,7 @@ step "fetch Firefox $VERSION source + apply patches"
   git -c user.email=a@a -c user.name=a commit -qm "camoufox-patched tree"
 
   step "apply termux firefox patches (termux-packages set, minus replaced/no-op ones)"
+TERMUX_PREFIX_UX="${PREFIX:-/data/data/com.termux/files/usr}"
   git config --global --add safe.directory "$(pwd)" || true
   TFP="$WORK/termux-firefox"
   if [ ! -d "$TFP" ]; then
@@ -92,8 +93,14 @@ step "fetch Firefox $VERSION source + apply patches"
     case "$name" in
       0003-*|0012-*|0023-*|0028-*|0031-*) echo "SKIP $name"; continue;;
     esac
-    if git apply --check "$p"; then
-      git apply "$p" && git add -A && echo "TERMUX-PATCH PASS $name"
+    # Termux substitutes build variables (@TERMUX_PREFIX@ etc.) in patch
+    # files before applying; raw placeholders would end up as literal paths
+    # inside the binary (0009's shm_open("/@TERMUX_PREFIX@/tmp/...")!).
+    sed -e "s|@TERMUX_PREFIX@|$TERMUX_PREFIX_UX|g" \
+        -e "s|@TERMUX_HOST_PLATFORM@|aarch64-linux-android|g" \
+        "$p" > "$WORK/termux-patch-$name"
+    if git apply --check "$WORK/termux-patch-$name"; then
+      git apply "$WORK/termux-patch-$name" && git add -A && echo "TERMUX-PATCH PASS $name"
     else
       echo "TERMUX-PATCH FAIL $name"; FAIL=1
     fi
