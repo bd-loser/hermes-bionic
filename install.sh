@@ -2,6 +2,7 @@
 # hermes-bionic installer — Hermes Agent on Termux without compiling.
 #
 #   curl -fsSL https://raw.githubusercontent.com/bd-loser/hermes-bionic/main/install.sh | bash
+#   # + bd-loser Camoufox (Bionic-native Firefox): append --with-camoufox
 #
 # Downloads the CI-built `.[termux]` dependency wheel bundle (compiled in
 # termux-docker on ubuntu-24.04-arm), clones the matching upstream release,
@@ -27,6 +28,7 @@ echo "install log: $LOG"
 # run_step "description" command args...
 # Prints one line before and after, keeps the full output in $LOG, and on
 # failure shows the last lines of that step's output instead of hiding it.
+
 run_step() {
   local desc="$1"; shift
   say "$desc ..."
@@ -44,8 +46,72 @@ run_step() {
   fi
 }
 
+# --- optional: bd-loser Camoufox (Bionic-native anti-fingerprint Firefox) --
+# Served by the same apt repo already used for the opencode debs (one key,
+# one source); the deb ships the engine under $PREFIX/opt/camoufox plus the
+# $PREFIX/bin/camoufox launcher. If the Pages apt repo is unreachable, fall
+# back to the rolling bionic-latest release, checksum verified — the same
+# fail-closed posture as the wheels above. Optional step: on failure this
+# warns and returns non-zero; hermes itself stays installed and healthy.
+install_camoufox() {
+  if command -v camoufox >/dev/null 2>&1; then
+    say "camoufox already installed: $(camoufox --version 2>/dev/null | head -1)"
+    return 0
+  fi
+  say "Installing camoufox (Bionic-native Firefox, ~70 MB download)..."
+  local list="$PREFIX/etc/apt/sources.list.d/opencode-bionic.list"
+  if [ ! -f "$list" ]; then
+    say "Adding bd-loser apt repo (key + source)..."
+    if ! { curl -fsSL https://bd-loser.github.io/opencode-bionic/opencode-bionic.gpg \
+            -o "$PREFIX/etc/apt/trusted.gpg.d/opencode-bionic.gpg" >>"$LOG" 2>&1 \
+          && echo "deb [arch=aarch64] https://bd-loser.github.io/opencode-bionic stable main" \
+            > "$list"; }; then
+      warn "could not add bd-loser apt repo"
+      return 1
+    fi
+  fi
+  say "Installing camoufox via apt ..."
+  if apt update >>"$LOG" 2>&1 && apt install -y camoufox >>"$LOG" 2>&1; then
+    say "camoufox $(camoufox --version 2>/dev/null | head -1): ok"
+    return 0
+  fi
+  warn "apt install failed; trying direct release download"
+  local tmp js name base
+  tmp="$(mktemp -d)"
+  js="$(curl -fsSL https://api.github.com/repos/bd-loser/camoufox-termux/releases/tags/bionic-latest)" \
+    || { warn "cannot reach bd-loser/camoufox-termux bionic-latest"; return 1; }
+  name="$(printf '%s' "$js" \
+    | grep -oE '"name": *"(camoufox-[^"/]+-aarch64)\.deb"' | head -1 \
+    | sed -E 's/.*"([^"]+)"$/\1/')"
+  [ -n "$name" ] || { warn "no camoufox deb asset on bionic-latest"; return 1; }
+  base="https://github.com/bd-loser/camoufox-termux/releases/download/bionic-latest/$name"
+  curl -fsSL -o "$tmp/$name" "$base" >>"$LOG" 2>&1 \
+    || { warn "deb download failed"; rm -rf "$tmp"; return 1; }
+  curl -fsSL -o "$tmp/$name.sha256" "$base.sha256" >>"$LOG" 2>&1 \
+    || { warn "checksum download failed"; rm -rf "$tmp"; return 1; }
+  if ! ( cd "$tmp" && sha256sum -c "$name.sha256" >/dev/null ); then
+    warn "camoufox deb checksum MISMATCH (refusing to install)"
+    rm -rf "$tmp"; return 1
+  fi
+  apt install -y gtk3 libandroid-shmem libandroid-spawn libc++ >>"$LOG" 2>&1 || true
+  dpkg -i "$tmp/$name" >>"$LOG" 2>&1 \
+    || { warn "dpkg install failed (full log: $LOG)"; rm -rf "$tmp"; return 1; }
+  rm -rf "$tmp"
+  camoufox --version >/dev/null 2>&1 \
+    || { warn "camoufox installed but does not run (full log: $LOG)"; return 1; }
+  say "camoufox $(camoufox --version 2>/dev/null | head -1): ok"
+}
+
 [ -n "${PREFIX:-}" ] && [[ "$PREFIX" == *com.termux* ]] \
   || die "run this inside Termux (PREFIX not set)"
+
+WITH_CAMOFOX=0
+for arg in "$@"; do
+  case "$arg" in
+    --with-camoufox) WITH_CAMOFOX=1 ;;
+    *) die "unknown option: $arg (supported: --with-camoufox)" ;;
+  esac
+done
 
 say "Installing Termux prerequisites..."
 # openssl/libffi/libjpeg-turbo/libpng/zlib/freetype/libwebp/libheif are
@@ -205,6 +271,12 @@ ln -sf "$VENV/bin/hermes-acp" "$PREFIX/bin/hermes-acp" 2>/dev/null || true
 
 "$VENV/bin/hermes" --version >/dev/null 2>&1 \
   || die "hermes installed but does not start: run '$VENV/bin/hermes --version' for details"
+
+if [ "$WITH_CAMOFOX" = 1 ]; then
+  install_camoufox \
+    || warn "camoufox not installed (hermes itself is fine). Later: pkg install camoufox  (https://github.com/bd-loser/camoufox-termux)"
+fi
+
 say "Done: $("$VENV/bin/hermes" --version 2>/dev/null | head -1)"
 echo
 echo "Next: configure a provider key, e.g.  export OPENROUTER_API_KEY=***  then run 'hermes'."
