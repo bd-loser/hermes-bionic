@@ -117,12 +117,19 @@ say "Installing Termux prerequisites..."
 # openssl/libffi/libjpeg-turbo/libpng/zlib/freetype/libwebp/libheif are
 # runtime .so deps of the bundled wheels (cryptography, Pillow,
 # pillow-heif) — wheels link against the Termux system libs.
-# hermes-agent's bundled-dependency checkers expect ffmpeg/node/npm/ripgrep
-# on PATH (its update flow warns "install out of sync" without them); npm
-# ships inside nodejs.
-run_step "Installing Termux packages" pkg install -y python curl ca-certificates git ripgrep \
-  ffmpeg nodejs \
+# Split for rolling-repo resilience (Termux repos drift weekly; a package
+# that fails to configure must never kill the hermes install):
+#   CORE  — strict; the venv cannot start without these.
+#   EXTRAS— hermes-agent's bundled-dep checkers (ffmpeg/node/npm/ripgrep).
+#           Best-effort: on partial failure we warn + print the self-fix.
+run_step "Installing core Termux packages" pkg install -y python curl ca-certificates git \
   openssl libffi libjpeg-turbo libpng zlib freetype libwebp libheif
+if pkg install -y ripgrep ffmpeg nodejs >>"$LOG" 2>&1; then
+  say "bundled-dep tools (ffmpeg/node/npm/ripgrep): ok"
+else
+  warn "optional tools failed to install (rolling repo drift); hermes still installs"
+  warn "self-fix later with:  pkg update && pkg upgrade && pkg install ffmpeg nodejs ripgrep"
+fi
 
 # hermes pins every dependency as `==X.Y.Z; python_version >= '3.14'`.
 # Below 3.14 those markers do not apply, so the bundle must be — and be
