@@ -117,7 +117,11 @@ say "Installing Termux prerequisites..."
 # openssl/libffi/libjpeg-turbo/libpng/zlib/freetype/libwebp/libheif are
 # runtime .so deps of the bundled wheels (cryptography, Pillow,
 # pillow-heif) — wheels link against the Termux system libs.
+# hermes-agent's bundled-dependency checkers expect ffmpeg/node/npm/ripgrep
+# on PATH (its update flow warns "install out of sync" without them); npm
+# ships inside nodejs.
 run_step "Installing Termux packages" pkg install -y python curl ca-certificates git ripgrep \
+  ffmpeg nodejs \
   openssl libffi libjpeg-turbo libpng zlib freetype libwebp libheif
 
 # hermes pins every dependency as `==X.Y.Z; python_version >= '3.14'`.
@@ -201,6 +205,22 @@ rm -rf "$VENV"
 # setuptools+wheel up front: the editable install below runs with
 # --no-build-isolation (fully offline), so the backend must pre-exist.
 "$VENV/bin/pip" install --quiet --upgrade pip setuptools wheel
+
+# Android/termux Python ships no os.link (libc has no link()); upstream
+# hermes source-update calls it when installing bundled dependencies and
+# aborts with "module 'os' has no attribute 'link'". A venv-local
+# sitecustomize substitutes copy semantics — updates then complete.
+PYLIB="$VENV/lib/python$("$PYBIN" -c 'import sys;print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+cat > "$PYLIB/sitecustomize.py" <<'EOF'
+# hermes-bionic: Android Python has no os.link; hermes update uses it.
+# copy2 keeps the update's semantics (independent files) working.
+import os as _os
+if not hasattr(_os, 'link'):
+    import shutil as _sh
+    def _link(src, dst, *, follow_symlinks=True):
+        _sh.copy2(src, dst, follow_symlinks=follow_symlinks)
+    _os.link = _link
+EOF
 
 say "Installing dependencies (from local wheels, nothing compiles)..."
 # pins.txt is the exact set CI resolved: == pins + --no-index makes the
