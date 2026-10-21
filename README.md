@@ -8,6 +8,20 @@ aarch64 Android, built in CI, so your phone never runs a compiler.
 curl -fsSL https://raw.githubusercontent.com/bd-loser/hermes-bionic/main/install.sh | bash
 ```
 
+Optional, in the same run: `--with-camoufox` installs the Bionic-native
+anti-fingerprint Firefox engine (`camoufox` command).
+
+**Updating:** upstream blocks `hermes update` on Termux source checkouts —
+just rerun the command above; it resolves the newest release (with a
+matching Python-3.14 bundle), rebuilds the venv, and re-links `hermes`.
+Takes a few minutes and never compiles anything.
+
+Optional camoufox (anti-fingerprint Firefox engine, `camoufox` command):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/bd-loser/hermes-bionic/main/install.sh | bash -s -- --with-camoufox
+```
+
 ## Why this exists
 
 Upstream Hermes depends on native packages (cryptography, pydantic-core,
