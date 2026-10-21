@@ -217,7 +217,7 @@ rm -rf "$VENV"
 # hermes source-update calls it when installing bundled dependencies and
 # aborts with "module 'os' has no attribute 'link'". A venv-local
 # sitecustomize substitutes copy semantics — updates then complete.
-PYLIB="$VENV/lib/python$("$PYBIN" -c 'import sys;print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+PYLIB="$VENV/lib/python$("$PYBIN" -c 'import sys;print(f"{sys.version_info.major}.{sys.version_info.minor}")')/site-packages"
 cat > "$PYLIB/sitecustomize.py" <<'EOF'
 # hermes-bionic: Android Python has no os.link; hermes update uses it.
 # copy2 keeps the update's semantics (independent files) working.
