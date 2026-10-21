@@ -128,7 +128,7 @@ if pkg install -y ripgrep ffmpeg nodejs >>"$LOG" 2>&1; then
   say "bundled-dep tools (ffmpeg/node/npm/ripgrep): ok"
 else
   warn "optional tools failed to install (rolling repo drift); hermes still installs"
-  warn "self-fix later with:  pkg update && pkg upgrade && pkg install ffmpeg nodejs ripgrep"
+  warn "self-fix later with:  pkg install ffmpeg nodejs ripgrep"
 fi
 
 # hermes pins every dependency as `==X.Y.Z; python_version >= '3.14'`.
