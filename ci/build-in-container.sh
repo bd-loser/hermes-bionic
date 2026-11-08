@@ -228,6 +228,20 @@ PRIMP_SRC="$PRIMP_DIR/primp-$PRIMP_VER"
 "$PYBIN" /workspace/ci/patch-primp.py "$PRIMP_SRC"
 pip wheel --no-deps "$PRIMP_SRC" -w "$TMPDIR/primp-wheel"
 
+# browser-harness 0.1.13 pins `pillow==12.3.0` while hermes pins
+# `Pillow==13.0.0` (its own vision-tool pin) and pins browser-harness
+# exactly, so a plain resolve is ResolutionImpossible on every platform.
+# Rewrite the wheel's pin to `pillow>=12.3.0` and re-version it to
+# 0.1.13+termux1 so it deterministically beats the PyPI original from the
+# find-links dir (PEP 440: `==0.1.13` still matches `0.1.13+termux1`, and
+# the local label sorts higher). If upstream already relaxed the pin the
+# script copies the wheel through untouched and this is a no-op.
+BH_DIR="$TMPDIR/browser-harness-wheel"
+mkdir -p "$BH_DIR"
+pip download --no-deps "browser-harness==0.1.13" -d "$TMPDIR/bh-dl" \
+  || { echo "error: cannot download browser-harness==0.1.13" >&2; exit 1; }
+"$PYBIN" /workspace/ci/patch-browser-harness.py "$TMPDIR/bh-dl"/browser_harness-*.whl "$BH_DIR"
+
 # upstream deleted constraints-termux.txt when every direct dep moved into
 # pyproject.toml behind exact == pins; an unconditional -c then dies with
 # "Could not open requirements file". Keep honouring it where upstream still
@@ -251,7 +265,8 @@ fi
 "$PYBIN" -m pip install --dry-run --report "$TMPDIR/report.json" \
   "$BUILD_ROOT[termux,ddgs]" \
   "${CONSTRAINTS[@]}" \
-  -f "$TMPDIR/psutil-wheel"
+  -f "$TMPDIR/psutil-wheel" \
+  -f "$BH_DIR"
 "$PYBIN" - "$TMPDIR/report.json" "$TMPDIR/deps.txt" <<'EOF'
 import json, sys
 rep = json.load(open(sys.argv[1]))
@@ -322,6 +337,7 @@ wheel_half() {
   PIP_CACHE_DIR="$2" "$PYBIN" -u -m pip wheel --no-deps -r "$1" \
     "${CONSTRAINTS[@]}" \
     -f "$TMPDIR/psutil-wheel" \
+    -f "$BH_DIR" \
     ${UVLOOP_PIN:+-f "$TMPDIR/uvloop-wheel"} \
     -w "$WHEELS" 2>&1 | sed -u "s/^/[$3] /"
 }
@@ -339,6 +355,9 @@ echo "→ both halves done"
 cp "$TMPDIR"/psutil-wheel/*.whl "$WHEELS"/
 # patched primp (hickory-dns off) — same name/version as pins.txt.
 cp "$TMPDIR"/primp-wheel/primp-*.whl "$WHEELS"/
+# patched browser-harness (pillow pin relaxed). `pip wheel` treats an
+# already-built wheel from find-links as satisfied and does not copy it.
+cp "$BH_DIR"/*.whl "$WHEELS"/
 [ -n "$UVLOOP_PIN" ] && cp "$TMPDIR"/uvloop-wheel/*.whl "$WHEELS"/
 
 # Check normalized distribution names, exact versions, and interpreter tags.
