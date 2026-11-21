@@ -53,15 +53,45 @@ run_step() {
 # back to the rolling bionic-latest release, checksum verified — the same
 # fail-closed posture as the wheels above. Optional step: on failure this
 # warns and returns non-zero; hermes itself stays installed and healthy.
+# camoufox's runtime .so closure on top of gtk3: libnspr (libplds4/libplc4/
+# libnspr4), libnss (libnss3/libnssutil3/libsmime3/libssl3), libevent,
+# libvpx and libwebp (gdk-pixbuf does not pull it). The .deb declares these
+# too — this list is what the raw-dpkg fallback installs (issue #1/#4).
+CAMOFOX_DEPS="gtk3 libandroid-shmem libandroid-spawn libc++ libwebp libevent libvpx libnspr libnss"
+
+# camoufox loads libxul.so, which needs the libs above AND gtk3 (only in the
+# official x11 repo). Checking `command -v camoufox` is not enough: a package
+# can install a launcher that then dies with "library libplds4.so not found".
+# Probe the real thing, not the filename.
+camoufox_works() {
+  camoufox --version >/dev/null 2>&1
+}
+camoufox_summary() {
+  camoufox --version 2>/dev/null | head -1
+}
 install_camoufox() {
   if command -v camoufox >/dev/null 2>&1; then
-    say "camoufox already installed: $(camoufox --version 2>/dev/null | head -1)"
-    return 0
+    if camoufox_works; then
+      say "camoufox already installed: $(camoufox_summary)"
+      return 0
+    fi
+    warn "camoufox is present but fails to start (missing runtime libs?) — reinstalling"
   fi
   say "Installing camoufox (Bionic-native Firefox, ~70 MB download)..."
+
+  # The official x11 repo carries gtk3. Without it apt reads no candidate for
+  # gtk3 and every install path below is unsatisfiable (issue #4).
+  if [ ! -f "$PREFIX/etc/apt/sources.list.d/x11.list" ]; then
+    say "Enabling Termux x11 repo (gtk3 lives there)..."
+    pkg install -y x11-repo >>"$LOG" 2>&1 || apt install -y x11-repo >>"$LOG" 2>&1 || true
+  fi
+
   local list="$PREFIX/etc/apt/sources.list.d/opencode-bionic.list"
   if [ ! -f "$list" ]; then
     say "Adding bd-loser apt repo (key + source)..."
+    # apt does not create these on a fresh Termux, and writing a missing path
+    # fails before the fallback can run (issue #4).
+    mkdir -p "$PREFIX/etc/apt/sources.list.d" "$PREFIX/etc/apt/trusted.gpg.d"
     if ! { curl -fsSL https://bd-loser.github.io/opencode-bionic/opencode-bionic.gpg \
             -o "$PREFIX/etc/apt/trusted.gpg.d/opencode-bionic.gpg" >>"$LOG" 2>&1 \
           && echo "deb [arch=aarch64] https://bd-loser.github.io/opencode-bionic stable main" \
@@ -71,8 +101,8 @@ install_camoufox() {
     fi
   fi
   say "Installing camoufox via apt ..."
-  if apt update >>"$LOG" 2>&1 && apt install -y camoufox >>"$LOG" 2>&1; then
-    say "camoufox $(camoufox --version 2>/dev/null | head -1): ok"
+  if apt update >>"$LOG" 2>&1 && apt install -y camoufox >>"$LOG" 2>&1 && camoufox_works; then
+    say "camoufox $(camoufox_summary): ok"
     return 0
   fi
   warn "apt install failed; trying direct release download"
@@ -93,13 +123,14 @@ install_camoufox() {
     warn "camoufox deb checksum MISMATCH (refusing to install)"
     rm -rf "$tmp"; return 1
   fi
-  apt install -y gtk3 libandroid-shmem libandroid-spawn libc++ >>"$LOG" 2>&1 || true
+  # shellcheck disable=SC2086
+  apt install -y $CAMOFOX_DEPS >>"$LOG" 2>&1 || true
   dpkg -i "$tmp/$name" >>"$LOG" 2>&1 \
     || { warn "dpkg install failed (full log: $LOG)"; rm -rf "$tmp"; return 1; }
   rm -rf "$tmp"
-  camoufox --version >/dev/null 2>&1 \
-    || { warn "camoufox installed but does not run (full log: $LOG)"; return 1; }
-  say "camoufox $(camoufox --version 2>/dev/null | head -1): ok"
+  camoufox_works \
+    || { warn "camoufox installed but does not run (missing libs? full log: $LOG)"; return 1; }
+  say "camoufox $(camoufox_summary): ok"
 }
 
 [ -n "${PREFIX:-}" ] && [[ "$PREFIX" == *com.termux* ]] \
